@@ -1,0 +1,97 @@
+{
+  "id": "20260801_224340_193086",
+  "concertName": "tests/query_loop_resources_call",
+  "sourceReplayId": "20260801_224340_193086",
+  "createdAt": "2026-08-01T13:43:40.193290Z",
+  "nodes": {
+    "20260801_222856_337300_python": {
+      "id": "20260801_222856_337300_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:43:40.193230Z",
+      "kind": "none"
+    },
+    "20260801_222909_826199_cacheWrite_1": {
+      "id": "20260801_222909_826199_cacheWrite_1",
+      "name": "cacheWrite_2",
+      "type": "cacheWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:43:40.193237Z",
+      "kind": "none"
+    },
+    "20260801_223649_973699_cacheRead": {
+      "id": "20260801_223649_973699_cacheRead",
+      "name": "cacheRead_3",
+      "type": "cacheRead",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 45,
+      "updatedAt": "2026-08-01T13:43:40.265974Z",
+      "workerId": 0,
+      "startedAtMs": 1785591820197,
+      "finishedAtMs": 1785591820265,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_223649_973699_cacheRead.parquet"
+    }
+  },
+  "runId": "eddfa8e6-a27e-4c7c-8316-d4f8c79d6d45",
+  "mode": "selected",
+  "selected": "20260801_223649_973699_cacheRead",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {
+    "value": 1
+  },
+  "inputParams": {
+    "value": 1
+  },
+  "globalVariables": [],
+  "inputVariables": [
+    {
+      "name": "$value",
+      "type": "number",
+      "defaultValue": 1
+    }
+  ],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 98,
+    "buildConcertMs": 0,
+    "executionMs": 45,
+    "replaySaveMs": 23,
+    "executionReplayMs": 68,
+    "cacheSaveMs": 12,
+    "executionReplayCacheMs": 80
+  },
+  "updatedAt": "2026-08-01T13:43:40.290871Z",
+  "finishedAt": "2026-08-01T13:43:40.290864Z"
+}

@@ -1,0 +1,83 @@
+{
+  "id": "20260802_214928_713785",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_214928_713785",
+  "createdAt": "2026-08-02T12:49:28.713877Z",
+  "nodes": {
+    "20260802_214104_022000_python": {
+      "id": "20260802_214104_022000_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-02T12:49:28.720446Z",
+      "workerId": 0,
+      "startedAtMs": 1785674968720,
+      "finishedAtMs": 1785674968720,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260802_214104_022000_python.parquet"
+    },
+    "20260802_214529_331800_python": {
+      "id": "20260802_214529_331800_python",
+      "name": "python_2",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 1,
+      "updatedAt": "2026-08-02T12:49:28.717149Z",
+      "workerId": 0,
+      "startedAtMs": 1785674968715,
+      "finishedAtMs": 1785674968717,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260802_214529_331800_python.parquet"
+    }
+  },
+  "runId": "269c84f5-b2ee-49f0-869b-62c3c14a63f2",
+  "mode": "all",
+  "selected": "20260802_214529_331800_python",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 14,
+    "buildConcertMs": 0,
+    "executionMs": 1,
+    "replaySaveMs": 0,
+    "executionReplayMs": 1,
+    "cacheSaveMs": 3,
+    "executionReplayCacheMs": 4
+  },
+  "updatedAt": "2026-08-02T12:49:28.727719Z",
+  "finishedAt": "2026-08-02T12:49:28.727708Z"
+}

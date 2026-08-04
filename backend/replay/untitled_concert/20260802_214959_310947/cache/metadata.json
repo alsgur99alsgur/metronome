@@ -1,0 +1,75 @@
+{
+  "id": "20260802_214959_310947",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_214959_310947",
+  "createdAt": "2026-08-02T12:49:59.311059Z",
+  "nodes": {
+    "20260802_214104_022000_python": {
+      "id": "20260802_214104_022000_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 239, in python\n    return scope[func_name](inputs)\n           ~~~~~~~~~~~~~~~~^^^^^^^^\n  File \"<concert-python>\", line 14, in func_python_1\nNameError: name 'time' is not defined. Did you forget to import 'time'?\n",
+      "error": "name 'time' is not defined",
+      "durationMs": null,
+      "updatedAt": "2026-08-02T12:50:01.321087Z",
+      "workerId": 0,
+      "startedAtMs": 1785675001319,
+      "finishedAtMs": 1785675001321,
+      "kind": "none"
+    },
+    "20260802_214529_331800_python": {
+      "id": "20260802_214529_331800_python",
+      "name": "python_2",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 2001,
+      "updatedAt": "2026-08-02T12:50:01.314663Z",
+      "workerId": 0,
+      "startedAtMs": 1785674999313,
+      "finishedAtMs": 1785675001314,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260802_214529_331800_python.parquet"
+    }
+  },
+  "runId": "6bb020cc-f5fa-4966-9444-e84a2962e146",
+  "mode": "all",
+  "selected": null,
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 2010,
+    "buildConcertMs": 0,
+    "executionMs": 2001,
+    "replaySaveMs": 0,
+    "executionReplayMs": 2001,
+    "cacheSaveMs": 3,
+    "executionReplayCacheMs": 2004
+  },
+  "updatedAt": "2026-08-02T12:50:01.321170Z",
+  "finishedAt": "2026-08-02T12:50:01.321165Z"
+}

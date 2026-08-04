@@ -1,0 +1,103 @@
+{
+  "id": "20260802_001329_618024",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_001329_618024",
+  "createdAt": "2026-08-01T15:13:29.618183Z",
+  "nodes": {
+    "20260801_232906_616900_python": {
+      "id": "20260801_232906_616900_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 1,
+      "updatedAt": "2026-08-01T15:13:29.623871Z",
+      "workerId": 0,
+      "startedAtMs": 1785597209622,
+      "finishedAtMs": 1785597209623,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value",
+        "value1"
+      ],
+      "dtypes": {
+        "value": "int64",
+        "value1": "int64"
+      },
+      "file": "20260801_232906_616900_python.parquet"
+    },
+    "20260801_235347_165800_cacheWrite": {
+      "id": "20260801_235347_165800_cacheWrite",
+      "name": "cacheWrite_2",
+      "type": "cacheWrite",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 309, in write_resource\n    resource_store.append(\n    ~~~~~~~~~~~~~~~~~~~~~^\n        kind,\n        ^^^^^\n    ...<3 lines>...\n        run_id=run_id,\n        ^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 158, in append\n    raise ValueError(\"Resource and input DataFrame columns must match exactly.\")\nValueError: Resource and input DataFrame columns must match exactly.\n",
+      "error": "Resource and input DataFrame columns must match exactly.",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T15:13:29.693706Z",
+      "workerId": 0,
+      "startedAtMs": 1785597209687,
+      "finishedAtMs": 1785597209693,
+      "kind": "none"
+    },
+    "20260801_235412_586500_cacheWrite": {
+      "id": "20260801_235412_586500_cacheWrite",
+      "name": "cacheWrite_3",
+      "type": "cacheWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T15:13:29.618113Z",
+      "kind": "none"
+    },
+    "20260801_235627_612000_cacheRead": {
+      "id": "20260801_235627_612000_cacheRead",
+      "name": "cacheRead_4",
+      "type": "cacheRead",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T15:13:29.618116Z",
+      "kind": "none"
+    }
+  },
+  "runId": "b9281572-0c4c-46d3-b414-eec6deb4e5c8",
+  "mode": "selected",
+  "selected": "20260801_235347_165800_cacheWrite",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 76,
+    "buildConcertMs": 0,
+    "executionMs": 1,
+    "replaySaveMs": 0,
+    "executionReplayMs": 1,
+    "cacheSaveMs": 50,
+    "executionReplayCacheMs": 51
+  },
+  "updatedAt": "2026-08-01T15:13:29.693821Z",
+  "finishedAt": "2026-08-01T15:13:29.693812Z"
+}

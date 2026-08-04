@@ -1,0 +1,12 @@
+{
+  "oracle": {
+    "poolMin": 1,
+    "poolMax": 10,
+    "poolIncrement": 1,
+    "writeBatchSize": 1000
+  },
+  "executor": {
+    "workers": 10,
+    "timeoutSeconds": 60
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "concertId": "44929c86-45d9-49e5-90f3-9db31ed95d4e",
+  "version": "1.00.03",
+  "name": "untitled_concert",
+  "nodes": [
+    {
+      "id": "20260802_235922_672799_dbRead",
+      "type": "dbRead",
+      "position": {
+        "x": 300,
+        "y": 300
+      },
+      "data": {
+        "name": "db_read_1",
+        "connection": "",
+        "sql": "-- DB Read bind parameters use the same shape with or without input data.\n-- With input: df[\"customer\"] -> :customer for each DataFrame row.\n-- Without input: Concert params with matching names are used.\nselect *\nfrom customer_table\nwhere customer = :customer"
+      }
+    }
+  ],
+  "edges": [],
+  "globalVariables": [],
+  "inputVariables": []
+}

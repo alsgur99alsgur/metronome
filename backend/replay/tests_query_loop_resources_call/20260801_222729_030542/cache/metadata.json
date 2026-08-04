@@ -1,0 +1,213 @@
+{
+  "id": "20260801_222729_030542",
+  "concertName": "tests/query_loop_resources_call",
+  "sourceReplayId": "20260801_222729_030542",
+  "createdAt": "2026-08-01T13:27:29.030988Z",
+  "nodes": {
+    "stage_cache_read": {
+      "id": "stage_cache_read",
+      "name": "Read Stage Cache",
+      "type": "cacheRead",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 292, in read_resource\n    return resource_store.read(kind, scope, resource_name, run_id=run_id)\n           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 146, in read\n    return self._read_unlocked(key)\n           ~~~~~~~~~~~~~~~~~~~^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 88, in _read_unlocked\n    raise FileNotFoundError(f\"{scope.title()} Cache not found: {name}\")\nFileNotFoundError: Stage Cache not found: integration_seed_cache\n",
+      "error": "Stage Cache not found: integration_seed_cache",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.060058Z",
+      "workerId": 0,
+      "startedAtMs": 1785590849037,
+      "finishedAtMs": 1785590849060,
+      "kind": "none"
+    },
+    "query": {
+      "id": "query",
+      "name": "Oracle Query",
+      "type": "query",
+      "status": "skipped",
+      "logs": "",
+      "error": "Skipped because parent Read Stage Cache failed: Stage Cache not found: integration_seed_cache",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.060299Z",
+      "kind": "none"
+    },
+    "loop_in": {
+      "id": "loop_in",
+      "name": "Loop All Rows",
+      "type": "loopIn",
+      "status": "skipped",
+      "logs": "",
+      "error": "Skipped because parent Oracle Query failed: Stage Cache not found: integration_seed_cache",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.060433Z",
+      "kind": "none"
+    },
+    "loop_python": {
+      "id": "loop_python",
+      "name": "Loop Transform",
+      "type": "python",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030833Z",
+      "kind": "none"
+    },
+    "loop_out": {
+      "id": "loop_out",
+      "name": "Loop Stop",
+      "type": "loopOut",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030838Z",
+      "kind": "none"
+    },
+    "stage_cache_write": {
+      "id": "stage_cache_write",
+      "name": "Append Stage Cache",
+      "type": "cacheWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Skipped because parent Loop All Rows failed: Stage Cache not found: integration_seed_cache",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.060471Z",
+      "kind": "none"
+    },
+    "concert_cache_write": {
+      "id": "concert_cache_write",
+      "name": "Append Concert Cache",
+      "type": "cacheWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030853Z",
+      "kind": "none"
+    },
+    "concert_file_write": {
+      "id": "concert_file_write",
+      "name": "Append Concert File",
+      "type": "fileWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030857Z",
+      "kind": "none"
+    },
+    "concert_call": {
+      "id": "concert_call",
+      "name": "Call Child Concert",
+      "type": "concert",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030861Z",
+      "kind": "none"
+    },
+    "stage_file_read": {
+      "id": "stage_file_read",
+      "name": "Read Stage File",
+      "type": "fileRead",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030866Z",
+      "kind": "none"
+    },
+    "stage_file_transform": {
+      "id": "stage_file_transform",
+      "name": "Stage File Transform",
+      "type": "python",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030870Z",
+      "kind": "none"
+    },
+    "stage_file_write": {
+      "id": "stage_file_write",
+      "name": "Append Stage File",
+      "type": "fileWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030875Z",
+      "kind": "none"
+    },
+    "20260801_222709_612199_cacheRead": {
+      "id": "20260801_222709_612199_cacheRead",
+      "name": "cacheRead_13",
+      "type": "cacheRead",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:27:29.030880Z",
+      "kind": "none"
+    }
+  },
+  "runId": "3bb57e39-9704-4830-9da3-ec019d53100f",
+  "mode": "selected",
+  "selected": "stage_cache_write",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {
+    "value": 1
+  },
+  "inputParams": {
+    "value": 1
+  },
+  "globalVariables": [],
+  "inputVariables": [
+    {
+      "name": "$value",
+      "type": "number",
+      "defaultValue": 1
+    }
+  ],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 30,
+    "buildConcertMs": 0,
+    "executionMs": 0,
+    "replaySaveMs": 0,
+    "executionReplayMs": 0,
+    "cacheSaveMs": 0,
+    "executionReplayCacheMs": 0
+  },
+  "updatedAt": "2026-08-01T13:27:29.060858Z",
+  "finishedAt": "2026-08-01T13:27:29.060817Z"
+}

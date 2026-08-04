@@ -1,0 +1,64 @@
+{
+  "id": "20260802_215106_792342",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_215106_792342",
+  "createdAt": "2026-08-02T12:51:06.792463Z",
+  "nodes": {
+    "20260802_214104_022000_python": {
+      "id": "20260802_214104_022000_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "skipped",
+      "logs": "",
+      "error": "Skipped because parent python_2 failed: name 'time' is not defined",
+      "durationMs": null,
+      "updatedAt": "2026-08-02T12:51:06.798006Z",
+      "kind": "none"
+    },
+    "20260802_214529_331800_python": {
+      "id": "20260802_214529_331800_python",
+      "name": "python_2",
+      "type": "python",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 239, in python\n    return scope[func_name](inputs)\n           ~~~~~~~~~~~~~~~~^^^^^^^^\n  File \"<concert-python>\", line 14, in func_python_2\nNameError: name 'time' is not defined. Did you forget to import 'time'?\n",
+      "error": "name 'time' is not defined",
+      "durationMs": null,
+      "updatedAt": "2026-08-02T12:51:06.797888Z",
+      "workerId": 0,
+      "startedAtMs": 1785675066795,
+      "finishedAtMs": 1785675066797,
+      "kind": "none"
+    }
+  },
+  "runId": "6dd6335f-9129-49e3-a9ab-e1a610382402",
+  "mode": "all",
+  "selected": null,
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 5,
+    "buildConcertMs": 0,
+    "executionMs": 0,
+    "replaySaveMs": 0,
+    "executionReplayMs": 0,
+    "cacheSaveMs": 0,
+    "executionReplayCacheMs": 0
+  },
+  "updatedAt": "2026-08-02T12:51:06.798208Z",
+  "finishedAt": "2026-08-02T12:51:06.798197Z"
+}

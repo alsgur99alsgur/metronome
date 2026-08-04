@@ -1,0 +1,157 @@
+{
+  "concertId": "a67e8714-960c-4ee4-8213-d8b61c875623",
+  "version": "1.00.00",
+  "name": "db_read_loop_resources_call",
+  "nodes": [
+    {
+      "id": "stage_cache_read",
+      "type": "cacheRead",
+      "position": { "x": 40, "y": 80 },
+      "data": {
+        "name": "Read Stage Cache",
+        "resourceKind": "cache",
+        "scope": "stage",
+        "resourceName": "integration_seed_cache"
+      }
+    },
+    {
+      "id": "db_read",
+      "type": "dbRead",
+      "position": { "x": 280, "y": 80 },
+      "data": {
+        "name": "Oracle DB Read",
+        "connection": "local",
+        "sql": "select :value as value, 'db_read' as source from dual"
+      }
+    },
+    {
+      "id": "loop_in",
+      "type": "loopIn",
+      "position": { "x": 520, "y": 80 },
+      "data": {
+        "name": "Loop All Rows",
+        "iterationMode": "allRows",
+        "groupByColumns": ""
+      }
+    },
+    {
+      "id": "loop_python",
+      "type": "python",
+      "position": { "x": 760, "y": 80 },
+      "data": {
+        "name": "Loop Transform",
+        "code": "def func_Loop_Transform(inputs):\n    df = inputs[0].copy()\n    df[\"loop_processed\"] = True\n    return df"
+      }
+    },
+    {
+      "id": "loop_out",
+      "type": "loopOut",
+      "position": { "x": 1000, "y": 80 },
+      "data": {
+        "name": "Loop Stop",
+        "maxIterations": "1",
+        "stopConditions": []
+      }
+    },
+    {
+      "id": "stage_cache_write",
+      "type": "cacheWrite",
+      "position": { "x": 1240, "y": 80 },
+      "data": {
+        "name": "Append Stage Cache",
+        "resourceKind": "cache",
+        "scope": "stage",
+        "resourceName": "integration_result_cache",
+        "operation": "append",
+        "condition": ""
+      }
+    },
+    {
+      "id": "concert_cache_write",
+      "type": "cacheWrite",
+      "position": { "x": 1480, "y": 80 },
+      "data": {
+        "name": "Append Concert Cache",
+        "resourceKind": "cache",
+        "scope": "concert",
+        "resourceName": "integration_run_cache",
+        "operation": "append",
+        "condition": ""
+      }
+    },
+    {
+      "id": "concert_file_write",
+      "type": "fileWrite",
+      "position": { "x": 1720, "y": 80 },
+      "data": {
+        "name": "Append Concert File",
+        "resourceKind": "file",
+        "scope": "concert",
+        "resourceName": "integration_run_file",
+        "operation": "append",
+        "condition": ""
+      }
+    },
+    {
+      "id": "concert_call",
+      "type": "concert",
+      "position": { "x": 1960, "y": 80 },
+      "data": {
+        "name": "Call Child Concert",
+        "concertId": "b58544f7-9bba-4afd-a631-b06e92e9fd69",
+        "concertName": "resource_loop_child",
+        "inputParams": {},
+        "calledConcertInputVariables": []
+      }
+    },
+    {
+      "id": "stage_file_read",
+      "type": "fileRead",
+      "position": { "x": 40, "y": 360 },
+      "data": {
+        "name": "Read Stage File",
+        "resourceKind": "file",
+        "scope": "stage",
+        "resourceName": "integration_seed_file"
+      }
+    },
+    {
+      "id": "stage_file_transform",
+      "type": "python",
+      "position": { "x": 280, "y": 360 },
+      "data": {
+        "name": "Stage File Transform",
+        "code": "def func_Stage_File_Transform(inputs):\n    df = inputs[0].copy()\n    df[\"file_processed\"] = True\n    return df"
+      }
+    },
+    {
+      "id": "stage_file_write",
+      "type": "fileWrite",
+      "position": { "x": 520, "y": 360 },
+      "data": {
+        "name": "Append Stage File",
+        "resourceKind": "file",
+        "scope": "stage",
+        "resourceName": "integration_result_file",
+        "operation": "append",
+        "condition": ""
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "stage_cache_read", "target": "db_read", "data": {} },
+    { "id": "e2", "source": "db_read", "target": "loop_in", "data": {} },
+    { "id": "e3", "source": "loop_in", "target": "loop_python", "data": {} },
+    { "id": "e4", "source": "loop_python", "target": "loop_out", "data": {} },
+    { "id": "e5", "source": "loop_out", "target": "stage_cache_write", "data": {} },
+    { "id": "e6", "source": "stage_cache_write", "target": "concert_cache_write", "data": {} },
+    { "id": "e7", "source": "concert_cache_write", "target": "concert_file_write", "data": {} },
+    { "id": "e8", "source": "concert_file_write", "target": "concert_call", "data": {} },
+    { "id": "e9", "source": "stage_file_read", "target": "stage_file_transform", "data": {} },
+    { "id": "e10", "source": "stage_file_transform", "target": "stage_file_write", "data": {} }
+  ],
+  "globalVariables": [],
+  "inputVariables": [
+    { "name": "$value", "type": "number", "defaultValue": 1 }
+  ]
+}

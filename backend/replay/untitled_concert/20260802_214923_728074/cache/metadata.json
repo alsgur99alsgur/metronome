@@ -1,0 +1,83 @@
+{
+  "id": "20260802_214923_728074",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_214923_728074",
+  "createdAt": "2026-08-02T12:49:23.728118Z",
+  "nodes": {
+    "20260802_214104_022000_python": {
+      "id": "20260802_214104_022000_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-02T12:49:23.731374Z",
+      "workerId": 0,
+      "startedAtMs": 1785674963731,
+      "finishedAtMs": 1785674963731,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260802_214104_022000_python.parquet"
+    },
+    "20260802_214529_331800_python": {
+      "id": "20260802_214529_331800_python",
+      "name": "python_2",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-02T12:49:23.729576Z",
+      "workerId": 0,
+      "startedAtMs": 1785674963729,
+      "finishedAtMs": 1785674963729,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260802_214529_331800_python.parquet"
+    }
+  },
+  "runId": "6c149e9b-806f-43ca-aa11-67b85f3cddf6",
+  "mode": "all",
+  "selected": "20260802_214529_331800_python",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 5,
+    "buildConcertMs": 0,
+    "executionMs": 0,
+    "replaySaveMs": 0,
+    "executionReplayMs": 0,
+    "cacheSaveMs": 1,
+    "executionReplayCacheMs": 1
+  },
+  "updatedAt": "2026-08-02T12:49:23.733907Z",
+  "finishedAt": "2026-08-02T12:49:23.733902Z"
+}

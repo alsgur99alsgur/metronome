@@ -1,0 +1,189 @@
+{
+  "id": "20260801_225728_495332",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260801_225728_495332",
+  "createdAt": "2026-08-01T13:57:28.495459Z",
+  "nodes": {
+    "20260801_225405_287199_cacheRead": {
+      "id": "20260801_225405_287199_cacheRead",
+      "name": "cacheRead_1",
+      "type": "cacheRead",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:57:28.495411Z",
+      "kind": "none"
+    },
+    "20260801_225419_249699_python_1": {
+      "id": "20260801_225419_249699_python_1",
+      "name": "python_2",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 1,
+      "updatedAt": "2026-08-01T13:57:28.498861Z",
+      "workerId": 0,
+      "startedAtMs": 1785592648496,
+      "finishedAtMs": 1785592648498,
+      "kind": "dataframe",
+      "rows": 4,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_225419_249699_python_1.parquet"
+    },
+    "20260801_225425_814699_cacheWrite": {
+      "id": "20260801_225425_814699_cacheWrite",
+      "name": "cacheWrite_3",
+      "type": "cacheWrite",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:57:28.495418Z",
+      "kind": "none"
+    },
+    "20260801_225519_397800_cacheWrite": {
+      "id": "20260801_225519_397800_cacheWrite",
+      "name": "cacheWrite_4",
+      "type": "cacheWrite",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-01T13:57:28.508149Z",
+      "workerId": 0,
+      "startedAtMs": 1785592648507,
+      "finishedAtMs": 1785592648508,
+      "kind": "dataframe",
+      "rows": 4,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_225519_397800_cacheWrite.parquet"
+    },
+    "20260801_225603_294000_cacheWrite_1": {
+      "id": "20260801_225603_294000_cacheWrite_1",
+      "name": "cacheWrite_5",
+      "type": "cacheWrite",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-01T13:57:28.514040Z",
+      "workerId": 0,
+      "startedAtMs": 1785592648513,
+      "finishedAtMs": 1785592648514,
+      "kind": "dataframe",
+      "rows": 4,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_225603_294000_cacheWrite_1.parquet"
+    },
+    "20260801_225614_565400_cacheRead": {
+      "id": "20260801_225614_565400_cacheRead",
+      "name": "cacheRead_6",
+      "type": "cacheRead",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 1,
+      "updatedAt": "2026-08-01T13:57:28.518525Z",
+      "workerId": 0,
+      "startedAtMs": 1785592648516,
+      "finishedAtMs": 1785592648518,
+      "kind": "dataframe",
+      "rows": 4,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_225614_565400_cacheRead.parquet"
+    },
+    "20260801_225625_275400_python": {
+      "id": "20260801_225625_275400_python",
+      "name": "python_7",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-01T13:57:28.511813Z",
+      "workerId": 0,
+      "startedAtMs": 1785592648511,
+      "finishedAtMs": 1785592648511,
+      "kind": "dataframe",
+      "rows": 4,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_225625_275400_python.parquet"
+    },
+    "20260801_225648_957199_cacheRead_1": {
+      "id": "20260801_225648_957199_cacheRead_1",
+      "name": "cacheRead_8",
+      "type": "cacheRead",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 292, in read_resource\n    return resource_store.read(kind, scope, resource_name, run_id=run_id)\n           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 146, in read\n    return self._read_unlocked(key)\n           ~~~~~~~~~~~~~~~~~~~^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 88, in _read_unlocked\n    raise FileNotFoundError(f\"{scope.title()} Cache not found: {name}\")\nFileNotFoundError: Concert Cache not found: A\n",
+      "error": "Concert Cache not found: A",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T13:57:28.530396Z",
+      "workerId": 0,
+      "startedAtMs": 1785592648520,
+      "finishedAtMs": 1785592648530,
+      "kind": "none"
+    }
+  },
+  "runId": "e8751c5f-42a9-4f99-b5ce-d0bf887648d6",
+  "mode": "selected",
+  "selected": "20260801_225648_957199_cacheRead_1",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 35,
+    "buildConcertMs": 0,
+    "executionMs": 2,
+    "replaySaveMs": 1,
+    "executionReplayMs": 3,
+    "cacheSaveMs": 7,
+    "executionReplayCacheMs": 10
+  },
+  "updatedAt": "2026-08-01T13:57:28.530514Z",
+  "finishedAt": "2026-08-01T13:57:28.530509Z"
+}

@@ -1,0 +1,247 @@
+import { useState } from "react";
+
+import ConcertListPanel from "./ConcertListPanel";
+
+const safeName = (value) => {
+  const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
+  if (!safe) return "task";
+  return /^\d/.test(safe) ? `task_${safe}` : safe;
+};
+
+const safeConcertPathName = (value) => {
+  const parts = String(value || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => safeName(part))
+    .filter(Boolean);
+  return parts.join("/");
+};
+
+const concertBaseName = (value) => safeName(String(value || "").replace(/\\/g, "/").split("/").pop());
+
+const encodeConcertPath = (value) =>
+  String(value || "")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+
+const normalizeVariableName = (value) => {
+  const name = String(value || "").trim().replace(/^\$+/, "");
+  return name ? `$${safeName(name)}` : "$var";
+};
+
+const inputVariableKey = (item) =>
+  normalizeVariableName(item?.name || "").replace(/^\$/, "");
+
+const stringifyParamValue = (value) => {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const inputVariablesToParamValues = (inputVariables = [], currentParams = {}) =>
+  Object.fromEntries(
+    inputVariables
+      .map((item) => {
+        const key = inputVariableKey(item);
+        if (!key || key === "var") return null;
+        return [
+          key,
+          stringifyParamValue(
+            currentParams[key] ?? item.defaultValue ?? "",
+          ),
+        ];
+      })
+      .filter(Boolean),
+  );
+
+function ColumnList({ columns = [], emptyText }) {
+  return (
+    <div className="column-list">
+      {columns.length ? (
+        columns.map((column) => (
+          <div className="column-row" key={`${column.name}-${column.type}`}>
+            <span className="column-name">{column.name}</span>
+            <span className="column-type">{column.type}</span>
+          </div>
+        ))
+      ) : (
+        <div className="column-empty">{emptyText}</div>
+      )}
+    </div>
+  );
+}
+
+function InputColumnsPanel({ inputDataframes = [] }) {
+  const inputColumns = inputDataframes[0]?.columns || [];
+  const inputMessage = inputDataframes[0]?.status === "not_run"
+    ? "Run parent node to inspect columns."
+    : "No connected input DataFrame.";
+
+  return (
+    <aside className="column-side-panel">
+      <div className="column-title">Input Columns</div>
+      <ColumnList columns={inputColumns} emptyText={inputMessage} />
+    </aside>
+  );
+}
+
+function OutputColumnsPanel({ outputColumns = [], outputMessage }) {
+  return (
+    <aside className="column-side-panel">
+      <div className="column-title">Output Columns</div>
+      <ColumnList columns={outputColumns} emptyText={outputMessage} />
+    </aside>
+  );
+}
+
+function ConcertPickerDialog({ apiBaseUrl, onSelect, onClose }) {
+  return (
+    <div className="concert-picker-backdrop" onClick={onClose}>
+      <section className="concert-picker" onClick={(event) => event.stopPropagation()}>
+        <div className="concert-picker-header">
+          <h2>Select Concert</h2>
+          <button className="icon-button" onClick={onClose} title="Close">
+            x
+          </button>
+        </div>
+        <ConcertListPanel apiBaseUrl={apiBaseUrl} fixedSource="concerts" onOpen={onSelect} />
+      </section>
+    </div>
+  );
+}
+
+export default function ConcertCallEditor({
+  editData,
+  setEditData,
+  apiBaseUrl = "http://localhost:8000",
+  inputDataframes = [],
+  outputColumns = [],
+  outputMessage = "Run this node to inspect Concert output columns.",
+}) {
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+
+  const loadConcertInputsByName = async (concertName, concertId = "") => {
+    const nextConcertName = safeConcertPathName(concertName || "");
+    if (!nextConcertName) {
+      setEditData((current) => ({
+        ...current,
+        concertLoadError: "Concert name is required.",
+      }));
+      return;
+    }
+
+    const response = await fetch(concertId
+      ? `${apiBaseUrl}/concerts-by-id/${encodeURIComponent(concertId)}`
+      : `${apiBaseUrl}/concerts/${encodeConcertPath(nextConcertName)}`);
+    if (!response.ok) {
+      setEditData((current) => ({
+        ...current,
+        concertLoadError:
+          response.status === 404
+            ? `Concert not found in backend: ${nextConcertName}`
+            : `Load Concert failed: ${response.status}`,
+        calledConcertInputVariables: [],
+        inputParamValues: {},
+        inputParams: {},
+      }));
+      return;
+    }
+
+    const payload = await response.json();
+    const nextInputVariables = payload.inputVariables;
+    setEditData((current) => ({
+      ...current,
+      concertId: payload.concertId,
+      concertName: concertBaseName(payload.name),
+      concertLoadError: undefined,
+      calledConcertInputVariables: nextInputVariables,
+      inputParamValues: inputVariablesToParamValues(
+        nextInputVariables,
+        current.inputParamValues || current.inputParams || {},
+      ),
+    }));
+  };
+
+  const selectConcert = async (concertName, concert) => {
+    setEditData((current) => ({
+      ...current,
+      concertId: concert.concertId,
+      concertName: concertBaseName(concertName),
+      concertLoadError: undefined,
+      calledConcertInputVariables: [],
+      inputParamValues: {},
+      inputParams: {},
+    }));
+    setIsPickerOpen(false);
+    await loadConcertInputsByName(concertName, concert.concertId);
+  };
+
+  const openPicker = () => setIsPickerOpen(true);
+
+  return (
+    <div className="concert-call-editor-grid">
+      <InputColumnsPanel inputDataframes={inputDataframes} />
+      <div className="simple-editor">
+        <label className="field-label">Concert</label>
+        <div className="concert-call-picker">
+          <input
+            className="text-input"
+            value={editData.concertName || ""}
+            readOnly
+          />
+          <button type="button" onClick={openPicker}>
+            Browse
+          </button>
+        </div>
+        <label className="field-label">Input Parameters</label>
+        {editData.concertLoadError && (
+          <div className="error-text inline-error">{editData.concertLoadError}</div>
+        )}
+        {(editData.calledConcertInputVariables || []).length === 0 ? (
+          <p className="muted">Load a backend Concert to inspect its input fields.</p>
+        ) : (
+          <div className="concert-call-param-list">
+            {(editData.calledConcertInputVariables || []).map((item, index) => {
+              const key = inputVariableKey(item);
+              return (
+                <div className="concert-call-param-row" key={`${key}-${index}`}>
+                  <label className="field-label">{normalizeVariableName(item.name)}</label>
+                  <input
+                    className="text-input"
+                    value={editData.inputParamValues?.[key] ?? ""}
+                    placeholder={String(item.defaultValue ?? "")}
+                    onChange={(event) =>
+                      setEditData((current) => ({
+                        ...current,
+                        inputParamValues: {
+                          ...(current.inputParamValues || {}),
+                          [key]: event.target.value,
+                        },
+                      }))
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <OutputColumnsPanel
+        outputColumns={outputColumns}
+        outputMessage={outputMessage}
+      />
+      {isPickerOpen && (
+        <ConcertPickerDialog
+          apiBaseUrl={apiBaseUrl}
+          onSelect={selectConcert}
+          onClose={() => setIsPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}

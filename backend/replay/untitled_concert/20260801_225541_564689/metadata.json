@@ -1,0 +1,20 @@
+{
+  "id": "20260801_225541_564689",
+  "concertName": "untitled_concert",
+  "createdAt": "2026-08-01T13:55:41.564772Z",
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": []
+}

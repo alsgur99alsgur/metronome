@@ -1,0 +1,61 @@
+{
+  "id": "20260801_232907_543038",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260801_232907_543038",
+  "createdAt": "2026-08-01T14:29:07.543161Z",
+  "nodes": {
+    "20260801_232906_616900_python": {
+      "id": "20260801_232906_616900_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 46,
+      "updatedAt": "2026-08-01T14:29:07.594609Z",
+      "workerId": 0,
+      "startedAtMs": 1785594547547,
+      "finishedAtMs": 1785594547594,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_232906_616900_python.parquet"
+    }
+  },
+  "runId": "5760ff12-af73-46b0-a8e5-4d3fc8139fa5",
+  "mode": "all",
+  "selected": "20260801_232901_252300_query",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 89,
+    "buildConcertMs": 0,
+    "executionMs": 46,
+    "replaySaveMs": 0,
+    "executionReplayMs": 46,
+    "cacheSaveMs": 33,
+    "executionReplayCacheMs": 79
+  },
+  "updatedAt": "2026-08-01T14:29:07.632228Z",
+  "finishedAt": "2026-08-01T14:29:07.632222Z"
+}

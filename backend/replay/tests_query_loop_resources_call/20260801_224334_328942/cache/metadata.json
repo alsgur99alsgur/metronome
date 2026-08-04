@@ -1,0 +1,106 @@
+{
+  "id": "20260801_224334_328942",
+  "concertName": "tests/query_loop_resources_call",
+  "sourceReplayId": "20260801_224334_328942",
+  "createdAt": "2026-08-01T13:43:34.330315Z",
+  "nodes": {
+    "20260801_222856_337300_python": {
+      "id": "20260801_222856_337300_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 75,
+      "updatedAt": "2026-08-01T13:43:34.418830Z",
+      "workerId": 0,
+      "startedAtMs": 1785591814343,
+      "finishedAtMs": 1785591814418,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_222856_337300_python.parquet"
+    },
+    "20260801_222909_826199_cacheWrite_1": {
+      "id": "20260801_222909_826199_cacheWrite_1",
+      "name": "cacheWrite_2",
+      "type": "cacheWrite",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 0,
+      "updatedAt": "2026-08-01T13:43:34.503692Z",
+      "workerId": 0,
+      "startedAtMs": 1785591814503,
+      "finishedAtMs": 1785591814503,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_222909_826199_cacheWrite_1.parquet"
+    },
+    "20260801_223649_973699_cacheRead": {
+      "id": "20260801_223649_973699_cacheRead",
+      "name": "cacheRead_3",
+      "type": "cacheRead",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-01T13:43:34.330223Z",
+      "kind": "none"
+    }
+  },
+  "runId": "97d06c8c-efd0-474a-855e-fd1bf5de0cf3",
+  "mode": "selected",
+  "selected": "20260801_222909_826199_cacheWrite_1",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {
+    "value": 1
+  },
+  "inputParams": {
+    "value": 1
+  },
+  "globalVariables": [],
+  "inputVariables": [
+    {
+      "name": "$value",
+      "type": "number",
+      "defaultValue": 1
+    }
+  ],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 178,
+    "buildConcertMs": 1,
+    "executionMs": 75,
+    "replaySaveMs": 0,
+    "executionReplayMs": 75,
+    "cacheSaveMs": 72,
+    "executionReplayCacheMs": 147
+  },
+  "updatedAt": "2026-08-01T13:43:34.506094Z",
+  "finishedAt": "2026-08-01T13:43:34.506090Z"
+}

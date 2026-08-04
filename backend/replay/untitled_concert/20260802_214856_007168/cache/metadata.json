@@ -1,0 +1,74 @@
+{
+  "id": "20260802_214856_007168",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_214856_007168",
+  "createdAt": "2026-08-02T12:48:56.008042Z",
+  "nodes": {
+    "20260802_214104_022000_python": {
+      "id": "20260802_214104_022000_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "skipped",
+      "logs": "",
+      "error": "Not included in selected run.",
+      "durationMs": null,
+      "loopIterations": null,
+      "cacheDurationMs": null,
+      "updatedAt": "2026-08-02T12:48:56.007935Z",
+      "kind": "none"
+    },
+    "20260802_214529_331800_python": {
+      "id": "20260802_214529_331800_python",
+      "name": "python_2",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 30,
+      "updatedAt": "2026-08-02T12:48:56.044825Z",
+      "workerId": 0,
+      "startedAtMs": 1785674936014,
+      "finishedAtMs": 1785674936044,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260802_214529_331800_python.parquet"
+    }
+  },
+  "runId": "5ce85558-a5f9-4bde-98a9-716fed26bcad",
+  "mode": "selected",
+  "selected": "20260802_214529_331800_python",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 123,
+    "buildConcertMs": 7,
+    "executionMs": 30,
+    "replaySaveMs": 0,
+    "executionReplayMs": 30,
+    "cacheSaveMs": 69,
+    "executionReplayCacheMs": 99
+  },
+  "updatedAt": "2026-08-02T12:48:56.121774Z",
+  "finishedAt": "2026-08-02T12:48:56.121767Z"
+}

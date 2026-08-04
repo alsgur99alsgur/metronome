@@ -1,0 +1,53 @@
+{
+  "id": "20260801_232902_393614",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260801_232902_393614",
+  "createdAt": "2026-08-01T14:29:02.393857Z",
+  "nodes": {
+    "20260801_232901_252300_query": {
+      "id": "20260801_232901_252300_query",
+      "name": "query_1",
+      "type": "query",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 210, in query\n    return execute_oracle_query_records(connection, sql, bind_records)\n  File \"/Users/mh/Desktop/metronome/backend/oracle_client.py\", line 193, in execute_oracle_query_records\n    return execute_oracle_query(connection_name, sql, params=bind_params)\n  File \"/Users/mh/Desktop/metronome/backend/oracle_client.py\", line 164, in execute_oracle_query\n    with acquire_connection(connection_name) as conn:\n         ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/oracle_client.py\", line 80, in acquire_connection\n    return get_connection_pool(connection_name).acquire()\n           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/oracle_client.py\", line 61, in get_connection_pool\n    connection = load_connection(connection_name)\n  File \"/Users/mh/Desktop/metronome/backend/oracle_client.py\", line 85, in load_connection\n    raise OracleUnavailable(\"Query node has no Oracle connection selected.\")\noracle_client.OracleUnavailable: Query node has no Oracle connection selected.\n",
+      "error": "Query node has no Oracle connection selected.",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T14:29:02.758864Z",
+      "workerId": 0,
+      "startedAtMs": 1785594542396,
+      "finishedAtMs": 1785594542758,
+      "kind": "none"
+    }
+  },
+  "runId": "93f07f4a-1b0c-492d-8916-0b9f8d49c5cd",
+  "mode": "all",
+  "selected": null,
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 368,
+    "buildConcertMs": 3,
+    "executionMs": 0,
+    "replaySaveMs": 0,
+    "executionReplayMs": 0,
+    "cacheSaveMs": 0,
+    "executionReplayCacheMs": 0
+  },
+  "updatedAt": "2026-08-01T14:29:02.758961Z",
+  "finishedAt": "2026-08-01T14:29:02.758952Z"
+}

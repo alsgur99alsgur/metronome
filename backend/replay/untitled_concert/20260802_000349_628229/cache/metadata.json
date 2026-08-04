@@ -1,0 +1,108 @@
+{
+  "id": "20260802_000349_628229",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_000349_628229",
+  "createdAt": "2026-08-01T15:03:49.629631Z",
+  "nodes": {
+    "20260801_232906_616900_python": {
+      "id": "20260801_232906_616900_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 94,
+      "updatedAt": "2026-08-01T15:03:49.733282Z",
+      "workerId": 0,
+      "startedAtMs": 1785596629638,
+      "finishedAtMs": 1785596629733,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_232906_616900_python.parquet"
+    },
+    "20260801_235347_165800_cacheWrite": {
+      "id": "20260801_235347_165800_cacheWrite",
+      "name": "cacheWrite_2",
+      "type": "cacheWrite",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 1,
+      "updatedAt": "2026-08-01T15:03:49.824059Z",
+      "workerId": 0,
+      "startedAtMs": 1785596629822,
+      "finishedAtMs": 1785596629824,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_235347_165800_cacheWrite.parquet"
+    },
+    "20260801_235412_586500_cacheWrite": {
+      "id": "20260801_235412_586500_cacheWrite",
+      "name": "cacheWrite_3",
+      "type": "cacheWrite",
+      "status": "error",
+      "logs": "Traceback (most recent call last):\n  File \"/Users/mh/Desktop/metronome/backend/executor.py\", line 78, in run\n    result_container[\"result\"] = task.execute(inputs)\n                                 ~~~~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/task.py\", line 32, in execute\n    return self.func(inputs)\n           ~~~~~~~~~^^^^^^^^\n  File \"/Users/mh/Desktop/metronome/backend/concert_builder.py\", line 320, in write_resource\n    resource_store.delete_rows(\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        kind,\n        ^^^^^\n    ...<3 lines>...\n        run_id=run_id,\n        ^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 170, in delete_rows\n    key = self._key(kind, scope, name, run_id)\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 45, in _key\n    name = self.validate_name(name)\n  File \"/Users/mh/Desktop/metronome/backend/resource_store.py\", line 33, in validate_name\n    raise ValueError(\"Resource name must contain only letters, numbers, '_', '-' or '.'.\")\nValueError: Resource name must contain only letters, numbers, '_', '-' or '.'.\n",
+      "error": "Resource name must contain only letters, numbers, '_', '-' or '.'.",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T15:03:49.838691Z",
+      "workerId": 0,
+      "startedAtMs": 1785596629831,
+      "finishedAtMs": 1785596629838,
+      "kind": "none"
+    },
+    "20260801_235627_612000_cacheRead": {
+      "id": "20260801_235627_612000_cacheRead",
+      "name": "cacheRead_4",
+      "type": "cacheRead",
+      "status": "skipped",
+      "logs": "",
+      "error": "Skipped because parent cacheWrite_3 failed: Resource name must contain only letters, numbers, '_', '-' or '.'.",
+      "durationMs": null,
+      "updatedAt": "2026-08-01T15:03:49.838754Z",
+      "kind": "none"
+    }
+  },
+  "runId": "81e8a2aa-4e81-4b94-8b04-b3f6f58bec75",
+  "mode": "selected",
+  "selected": "20260801_235627_612000_cacheRead",
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "error",
+  "timing": {
+    "totalElapsedMs": 211,
+    "buildConcertMs": 0,
+    "executionMs": 95,
+    "replaySaveMs": 0,
+    "executionReplayMs": 95,
+    "cacheSaveMs": 81,
+    "executionReplayCacheMs": 176
+  },
+  "updatedAt": "2026-08-01T15:03:49.838930Z",
+  "finishedAt": "2026-08-01T15:03:49.838918Z"
+}

@@ -1,0 +1,127 @@
+{
+  "id": "20260802_001459_027908",
+  "concertName": "untitled_concert",
+  "sourceReplayId": "20260802_001459_027908",
+  "createdAt": "2026-08-01T15:14:59.028204Z",
+  "nodes": {
+    "20260801_232906_616900_python": {
+      "id": "20260801_232906_616900_python",
+      "name": "python_1",
+      "type": "python",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 5,
+      "updatedAt": "2026-08-01T15:14:59.124343Z",
+      "workerId": 0,
+      "startedAtMs": 1785597299118,
+      "finishedAtMs": 1785597299124,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_232906_616900_python.parquet"
+    },
+    "20260801_235347_165800_cacheWrite": {
+      "id": "20260801_235347_165800_cacheWrite",
+      "name": "cacheWrite_2",
+      "type": "cacheWrite",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 4,
+      "updatedAt": "2026-08-01T15:14:59.167148Z",
+      "workerId": 0,
+      "startedAtMs": 1785597299162,
+      "finishedAtMs": 1785597299167,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_235347_165800_cacheWrite.parquet"
+    },
+    "20260801_235412_586500_cacheWrite": {
+      "id": "20260801_235412_586500_cacheWrite",
+      "name": "cacheWrite_3",
+      "type": "cacheWrite",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 11,
+      "updatedAt": "2026-08-01T15:14:59.412494Z",
+      "workerId": 0,
+      "startedAtMs": 1785597299400,
+      "finishedAtMs": 1785597299412,
+      "kind": "dataframe",
+      "rows": 3,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_235412_586500_cacheWrite.parquet"
+    },
+    "20260801_235627_612000_cacheRead": {
+      "id": "20260801_235627_612000_cacheRead",
+      "name": "cacheRead_4",
+      "type": "cacheRead",
+      "status": "success",
+      "logs": "",
+      "error": null,
+      "durationMs": 1,
+      "updatedAt": "2026-08-01T15:14:59.424131Z",
+      "workerId": 0,
+      "startedAtMs": 1785597299421,
+      "finishedAtMs": 1785597299424,
+      "kind": "dataframe",
+      "rows": 5,
+      "columns": [
+        "value"
+      ],
+      "dtypes": {
+        "value": "int64"
+      },
+      "file": "20260801_235627_612000_cacheRead.parquet"
+    }
+  },
+  "runId": "4c4528b7-4967-4ed3-80a7-2d2f50fb3e74",
+  "mode": "all",
+  "selected": null,
+  "replay": false,
+  "trigger": "manual",
+  "sourceKind": "user",
+  "sourceLabel": "User",
+  "sourceDetail": "User run from 127.0.0.1",
+  "callerName": "127.0.0.1",
+  "clientIp": "127.0.0.1",
+  "executedBy": {
+    "type": "manual",
+    "sourceKind": "user",
+    "clientIp": "127.0.0.1"
+  },
+  "params": {},
+  "inputParams": {},
+  "globalVariables": [],
+  "inputVariables": [],
+  "status": "success",
+  "timing": {
+    "totalElapsedMs": 401,
+    "buildConcertMs": 0,
+    "executionMs": 21,
+    "replaySaveMs": 2,
+    "executionReplayMs": 23,
+    "cacheSaveMs": 262,
+    "executionReplayCacheMs": 285
+  },
+  "updatedAt": "2026-08-01T15:14:59.428945Z",
+  "finishedAt": "2026-08-01T15:14:59.428933Z"
+}

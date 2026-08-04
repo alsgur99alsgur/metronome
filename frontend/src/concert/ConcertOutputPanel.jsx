@@ -1,0 +1,189 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const outputHeightCssVar = "--concert-output-height";
+const minOutputHeight = 140;
+const maxOutputHeight = 520;
+
+const statusOrder = {
+  error: 0,
+  running: 1,
+  pending: 2,
+  success: 3,
+  skipped: 4,
+  canceled: 5,
+  idle: 6,
+};
+
+const outputNodeTypes = new Set(["dbRead", "python", "dbWrite", "concert", "concertInput", "concertOutput", "cacheRead", "cacheWrite", "fileRead", "fileWrite"]);
+const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write" })[type] || type;
+
+const formatDuration = (value) => {
+  if (value == null) return "";
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
+};
+
+const resultSummary = (result) => {
+  if (!result) return "";
+  if (result.kind === "dataframe") {
+    return `${result.rows ?? 0} rows / ${(result.columns || []).length} columns`;
+  }
+  if (result.kind === "value") return "value";
+  return result.kind || "";
+};
+
+export default function ConcertOutputPanel({
+  nodes,
+  run,
+  selectedNode,
+  onClose,
+  onOpenNode,
+  showClose = true,
+  showResizer = true,
+  height,
+  onHeightChange,
+}) {
+  const [localOutputHeight, setLocalOutputHeight] = useState(220);
+  const dragStartRef = useRef(null);
+  const outputHeight = height ?? localOutputHeight;
+  const setOutputHeight = onHeightChange ?? setLocalOutputHeight;
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(outputHeightCssVar, `${outputHeight}px`);
+    return () => {
+      document.documentElement.style.removeProperty(outputHeightCssVar);
+    };
+  }, [outputHeight]);
+
+  useEffect(() => {
+    const onPointerMove = (event) => {
+      if (!dragStartRef.current) return;
+      event.preventDefault();
+      const delta = dragStartRef.current.y - event.clientY;
+      const nextHeight = Math.min(maxOutputHeight, Math.max(minOutputHeight, dragStartRef.current.height + delta));
+      setOutputHeight(nextHeight);
+    };
+
+    const onPointerUp = () => {
+      dragStartRef.current = null;
+      document.body.classList.remove("resizing-concert-output");
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      document.body.classList.remove("resizing-concert-output");
+    };
+  }, [setOutputHeight]);
+
+  const outputRows = useMemo(
+    () =>
+      nodes
+        .filter((node) => outputNodeTypes.has(node.type))
+        .map((node, index) => {
+          const nodeRun = run?.nodes?.[node.id];
+          const status = nodeRun?.status || node.data?.status || "idle";
+          const duration = nodeRun?.durationMs ?? node.data?.runDurationMs;
+          const result = nodeRun?.result;
+          const detail = nodeRun?.error || nodeRun?.logs || resultSummary(result) || "";
+
+          return {
+            id: node.id,
+            index,
+            name: node.data?.name || node.id,
+            type: node.type,
+            status,
+            duration,
+            detail,
+            error: nodeRun?.error || "",
+            logs: nodeRun?.logs || "",
+            result,
+          };
+        })
+        .filter((row) => row.status !== "idle" || row.detail || row.id === selectedNode?.id)
+        .sort((a, b) => {
+          const statusDiff = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
+          if (statusDiff !== 0) return statusDiff;
+          return a.index - b.index;
+        }),
+    [nodes, run, selectedNode],
+  );
+
+  const selectedOutput = selectedNode
+    ? outputRows.find((row) => row.id === selectedNode.id)
+    : null;
+  const headerStatus = run?.status || "idle";
+  const errorCount = outputRows.filter((row) => row.status === "error").length;
+
+  return (
+    <div className={`concert-output ${showResizer ? "" : "embedded"}`} onClick={(event) => event.stopPropagation()}>
+      {showResizer && (
+        <div
+          className="concert-output-resizer"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            dragStartRef.current = { y: event.clientY, height: outputHeight };
+            document.body.classList.add("resizing-concert-output");
+          }}
+          title="Resize output panel"
+        />
+      )}
+      <div className="concert-output-header">
+        <div>
+          <div className="eyebrow">Output</div>
+          <h2>Run Output</h2>
+        </div>
+        <span className={`run-pill ${headerStatus}`}>{headerStatus}</span>
+        <div className="concert-output-summary">
+          {errorCount ? `${errorCount} error${errorCount === 1 ? "" : "s"}` : "No errors"}
+        </div>
+        {showClose && (
+          <button className="icon-button" onClick={onClose} title="Close Output">
+            x
+          </button>
+        )}
+      </div>
+
+      <div className="concert-output-body">
+        <div className="concert-output-list">
+          {outputRows.length ? (
+            outputRows.map((row) => (
+              <button
+                className={`concert-output-row ${selectedNode?.id === row.id ? "selected" : ""}`}
+                key={row.id}
+                onDoubleClick={() => onOpenNode(row.id)}
+                title="Double click to open"
+              >
+                <span className={`status-dot ${row.status}`} />
+                <span className="concert-output-node">{row.name}</span>
+                <span className="concert-output-meta">
+                  {nodeTypeLabel(row.type)} / {row.status}
+                  {row.duration != null ? ` / ${formatDuration(row.duration)}` : ""}
+                </span>
+                <span className={`concert-output-preview ${row.error ? "error" : ""}`}>
+                  {row.detail || "(no output)"}
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="concert-output-empty">Run a Concert to see DataFrame output.</div>
+          )}
+        </div>
+
+        <div className="concert-output-detail">
+          {selectedOutput ? (
+            <>
+              <div className="result-title">{selectedOutput.name}</div>
+              <pre className={selectedOutput.error ? "error-text" : ""}>
+                {selectedOutput.error || selectedOutput.logs || resultSummary(selectedOutput.result) || "No output for this node."}
+              </pre>
+            </>
+          ) : (
+            <div className="concert-output-empty">Select a node to inspect its latest output.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
