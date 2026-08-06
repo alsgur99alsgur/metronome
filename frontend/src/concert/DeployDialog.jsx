@@ -49,9 +49,9 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
       const baseName = sourceName.split("/").pop();
       const production = concerts.find((item) => item.name.split("/").pop() === baseName);
       const versionMismatch = production && production.version !== version;
-      if (versionMismatch && !window.confirm(`Production version is ${production.version}. Deploy version ${version}?`)) return;
+      if (versionMismatch && !window.confirm(`Production version is ${production.version}. Rehearsal version ${version}?`)) return;
       const result = await onDeploy(version, directory, Boolean(versionMismatch));
-      setMessage(`Deployed to ${result.servers?.join(", ") || target}.`);
+      setMessage(`Rehearsal created on ${result.servers?.join(", ") || target}.`);
     } catch (nextError) {
       if (nextError?.name !== "AbortError") setError(nextError.message);
     } finally {
@@ -62,7 +62,9 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
       <section className="save-dialog deploy-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <h3>Deploy to {target}</h3>
+        <div className="dialog-header">
+          <div><div className="eyebrow">{target}</div><h3>Rehearsal</h3></div>
+        </div>
         <div className="deploy-dialog-grid">
           <aside className="deploy-folder-panel">
             <div className="deploy-folder-title"><span>Concerts</span></div>
@@ -88,7 +90,7 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
           </aside>
           <div className="deploy-settings">
             <div className="deploy-concert-list">
-              <div className="deploy-settings-title">Deployed Concerts</div>
+              <div className="deploy-settings-title">Production Concerts</div>
               <ConcertFileTable concerts={concerts} directory={directory} />
             </div>
             <label className="field-label">
@@ -105,7 +107,7 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
         </div>
         <div className="save-dialog-actions">
           <button disabled={busy} onClick={onClose}>Close</button>
-          <button className="primary-button" disabled={busy || Boolean(message)} onClick={deploy}>{busy ? "Deploying..." : "Deploy"}</button>
+          <button className="primary-button" disabled={busy || Boolean(message)} onClick={deploy}>{busy ? "Creating Rehearsal..." : "Rehearsal"}</button>
         </div>
       </section>
     </div>

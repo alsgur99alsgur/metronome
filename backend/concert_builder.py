@@ -207,7 +207,10 @@ def _build_db_read_task(task_id, name, data, params):
     def db_read(inputs):
         print(f"QUERY {name}")
         bind_records = _bind_records_from_inputs(inputs, params)
-        return execute_oracle_query_records(connection, sql, bind_records)
+        result = execute_oracle_query_records(connection, sql, bind_records)
+        if result.attrs.get("pm_fallback"):
+            print(f"PM SKIP {name}: Oracle connection failed; using cached empty schema.")
+        return result
 
     return Task(task_id, name, "dbRead", db_read)
 
@@ -256,7 +259,10 @@ def _build_db_write_task(task_id, name, data, params):
             bind_records = result.where(pd.notnull(result), None).to_dict(orient="records")
 
         row_count = execute_oracle_write_records(connection, sql, bind_records)
-        print(f"WRITE {name}: {row_count} rows affected")
+        if row_count is None:
+            print(f"PM SKIP {name}: Oracle connection failed; write was not executed.")
+        else:
+            print(f"WRITE {name}: {row_count} rows affected")
         return result
 
     return Task(task_id, name, "dbWrite", db_write)

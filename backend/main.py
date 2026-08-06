@@ -19,12 +19,19 @@ from concert_store import ConcertStore
 from deployment_store import DeploymentStore, VersionMismatchError
 from concert_builder import build_concert, collect_dependencies
 from executor import Executor
-from oracle_client import OracleUnavailable, describe_oracle_query, list_connection_names
+from oracle_client import (
+    OracleUnavailable,
+    describe_oracle_query,
+    list_admin_connections,
+    list_connection_names,
+    save_admin_connections,
+    test_connection_settings,
+)
 from replay_data_store import ReplayDataStore
 from resource_store import ResourceStore
 from server_manager import ServerManager
 from schema_inference import infer_concert_columns
-
+from timer_manager import TimerManager
 
 BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
 REPLAY_ROOT = os.path.join(BACKEND_ROOT, "replay")
@@ -32,6 +39,7 @@ CONCERT_ROOT = os.path.join(BACKEND_ROOT, "concerts")
 STAGE_ROOT = os.path.join(BACKEND_ROOT, "stage")
 TMP_ROOT = os.path.join(BACKEND_ROOT, "tmp")
 SERVERS_PATH = os.path.join(BACKEND_ROOT, "servers.json")
+TIMERS_PATH = os.path.join(BACKEND_ROOT, "timers.json")
 EXECUTOR_ID = socket.gethostname()
 
 
@@ -74,6 +82,38 @@ class TriggerRunRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     mode: str = "all"
     selected: Optional[str] = None
+
+
+class TimerRequest(BaseModel):
+    id: Optional[str] = None
+    name: str
+    concertName: str
+    intervalSeconds: int = Field(ge=1)
+    firstRunAt: str
+    enabled: bool = True
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class TimerBatchRequest(BaseModel):
+    timers: list[TimerRequest] = Field(default_factory=list)
+
+
+class AdminConnectionRequest(BaseModel):
+    originalName: str = ""
+    name: str
+    user: str
+    password: str = ""
+    dsn: str
+    enable: bool = True
+    pm: bool = False
+
+
+class AdminConnectionsRequest(BaseModel):
+    connections: list[AdminConnectionRequest] = Field(default_factory=list)
+
+
+class AdminConnectionTestRequest(AdminConnectionRequest):
+    pass
 
 
 class DbReadDescribeRequest(BaseModel):
@@ -195,10 +235,16 @@ def _run_source_metadata(trigger, request=None):
         return {
             "sourceKind": "user",
             "sourceLabel": "User",
-            "sourceDetail": f"User run from {client_host}" if client_host else "User run",
+            "sourceDetail": (
+                f"User run from {client_host}" if client_host else "User run"
+            ),
             "callerName": client_host or "",
             "clientIp": client_host,
-            "executedBy": {"type": "manual", "sourceKind": "user", "clientIp": client_host},
+            "executedBy": {
+                "type": "manual",
+                "sourceKind": "user",
+                "clientIp": client_host,
+            },
         }
     if trigger == "scheduler":
         return {
@@ -237,7 +283,12 @@ def _sql_bind_defaults(sql, params):
 app = FastAPI(default_response_class=AllowNaNJSONResponse)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -250,6 +301,21 @@ concert_store = ConcertStore(CONCERT_ROOT)
 deployment_store = DeploymentStore(BACKEND_ROOT)
 resource_store = ResourceStore(STAGE_ROOT, TMP_ROOT)
 server_manager = ServerManager(SERVERS_PATH)
+timer_manager = TimerManager(
+    TIMERS_PATH,
+    run_callback=lambda timer: _queue_timer(timer),
+    status_callback=lambda run_id: _timer_run_state(run_id),
+)
+
+
+@app.on_event("startup")
+def start_timer_manager():
+    timer_manager.start()
+
+
+@app.on_event("shutdown")
+def stop_timer_manager():
+    timer_manager.stop()
 
 
 def _run_timestamp():
@@ -281,11 +347,7 @@ def _initial_node_states(task_map):
 
 def _run_response(run_state, include_data=False):
     def node_without_result(node):
-        next_node = {
-            key: value
-            for key, value in node.items()
-            if key != "result"
-        }
+        next_node = {key: value for key, value in node.items() if key != "result"}
         result = node.get("result")
         if isinstance(result, dict) and result.get("kind") == "dataframe":
             next_node["rows"] = result.get("rows")
@@ -294,11 +356,7 @@ def _run_response(run_state, include_data=False):
     response = {
         **run_state,
         "nodes": {
-            node_id: (
-                {**node}
-                if include_data
-                else node_without_result(node)
-            )
+            node_id: ({**node} if include_data else node_without_result(node))
             for node_id, node in run_state.get("nodes", {}).items()
         },
     }
@@ -362,13 +420,16 @@ def _run_in_background(
             if replay_save_duration_ms is not None:
                 run_state["timing"]["replaySaveMs"] += replay_save_duration_ms
             if cache_duration_ms is not None:
-                node["cacheDurationMs"] = (node.get("cacheDurationMs") or 0) + cache_duration_ms
+                node["cacheDurationMs"] = (
+                    node.get("cacheDurationMs") or 0
+                ) + cache_duration_ms
                 run_state["timing"]["cacheSaveMs"] += cache_duration_ms
             run_state["timing"]["executionReplayMs"] = (
                 run_state["timing"]["executionMs"] + run_state["timing"]["replaySaveMs"]
             )
             run_state["timing"]["executionReplayCacheMs"] = (
-                run_state["timing"]["executionReplayMs"] + run_state["timing"]["cacheSaveMs"]
+                run_state["timing"]["executionReplayMs"]
+                + run_state["timing"]["cacheSaveMs"]
             )
 
             statuses = [item["status"] for item in run_state["nodes"].values()]
@@ -389,6 +450,8 @@ def _run_in_background(
     cache_data_store = None
 
     def finish_cache(status, finished_at=None, timing=None):
+        if cache_metadata is None:
+            return
         if cache_data_store is not None:
             cache_data_store.finish(status, finished_at=finished_at, timing=timing)
             return
@@ -408,12 +471,13 @@ def _run_in_background(
             run_timestamp=run_timestamp,
         )
         replay_data_store.save_metadata(replay_metadata)
-        cache_data_store = CacheDataStore(
-            REPLAY_ROOT,
-            concert_name=concert_name,
-            source_replay_id=cache_metadata["sourceReplayId"],
-            metadata=cache_metadata,
-        )
+        if cache_metadata is not None:
+            cache_data_store = CacheDataStore(
+                REPLAY_ROOT,
+                concert_name=concert_name,
+                source_replay_id=cache_metadata["sourceReplayId"],
+                metadata=cache_metadata,
+            )
         executor = Executor(
             replay_data_store,
             cache_data_store=cache_data_store,
@@ -433,7 +497,9 @@ def _run_in_background(
             run_state["status"] = "error"
             run_state["updatedAt"] = _now()
             run_state["finishedAt"] = _now()
-            run_state["timing"]["totalElapsedMs"] = int((time.time() - run_started_at) * 1000)
+            run_state["timing"]["totalElapsedMs"] = int(
+                (time.time() - run_started_at) * 1000
+            )
             for node_id, node in run_state["nodes"].items():
                 if node_id in run_task_ids and node["status"] == "pending":
                     node["status"] = "skipped"
@@ -456,7 +522,9 @@ def _run_in_background(
         if run_state["status"] == "canceled":
             run_state["updatedAt"] = _now()
             run_state["finishedAt"] = _now()
-            run_state["timing"]["totalElapsedMs"] = int((time.time() - run_started_at) * 1000)
+            run_state["timing"]["totalElapsedMs"] = int(
+                (time.time() - run_started_at) * 1000
+            )
             finish_status = "canceled"
             finish_finished_at = run_state["finishedAt"]
             finish_timing = run_state.get("timing")
@@ -476,7 +544,9 @@ def _run_in_background(
                 run_state["status"] = "success"
             run_state["updatedAt"] = _now()
             run_state["finishedAt"] = _now()
-            run_state["timing"]["totalElapsedMs"] = int((time.time() - run_started_at) * 1000)
+            run_state["timing"]["totalElapsedMs"] = int(
+                (time.time() - run_started_at) * 1000
+            )
             finish_status = run_state["status"]
             finish_finished_at = run_state["finishedAt"]
             finish_timing = run_state.get("timing")
@@ -488,7 +558,10 @@ def _run_in_background(
 
 @app.get("/servers")
 def list_servers():
-    return {"servers": server_manager.list(), "defaultServerName": server_manager.primary["name"]}
+    return {
+        "servers": server_manager.list(),
+        "defaultServerName": server_manager.primary["name"],
+    }
 
 
 @app.get("/concerts")
@@ -516,7 +589,13 @@ def get_concert_by_id(concert_id: str):
 def save_concert(req: ConcertSaveRequest):
     try:
         return concert_store.save(
-            req.concertId, req.name, req.nodes, req.edges, req.globalVariables, req.inputVariables, req.version
+            req.concertId,
+            req.name,
+            req.nodes,
+            req.edges,
+            req.globalVariables,
+            req.inputVariables,
+            req.version,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -708,10 +787,36 @@ def delete_stage_resource(kind: str, name: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-
 @app.get("/connections")
 def list_connections():
     return {"connections": [{"name": name} for name in list_connection_names()]}
+
+
+@app.get("/admin/connections")
+def list_admin_connection_settings():
+    try:
+        return {"connections": list_admin_connections()}
+    except (ValueError, OracleUnavailable) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/admin/connections")
+def save_admin_connection_settings(req: AdminConnectionsRequest):
+    try:
+        items = [item.model_dump() for item in req.connections]
+        return {"connections": save_admin_connections(items)}
+    except (ValueError, OracleUnavailable) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/admin/connections/test")
+def test_admin_connection(req: AdminConnectionTestRequest):
+    try:
+        return test_connection_settings(
+            req.name, req.user, req.password, req.dsn, req.originalName
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/db-read/describe")
@@ -784,13 +889,16 @@ def _queue_run(
     input_variables=None,
     trigger="manual",
     request=None,
+    cache_enabled=True,
 ):
     concert_name = os.path.basename(ConcertStore.safe_path_name(concert_name))
     concert_id = ConcertStore.validate_id(concert_id)
     if not concert_name:
         raise HTTPException(status_code=400, detail="concertName is required")
     if replay and not replay_id:
-        raise HTTPException(status_code=400, detail="replayId is required for replay runs")
+        raise HTTPException(
+            status_code=400, detail="replayId is required for replay runs"
+        )
 
     params = _runtime_params(global_variables, input_variables, params)
     caller_input_params = _params_for_variables(input_variables, params)
@@ -813,14 +921,19 @@ def _queue_run(
 
     if mode == "selected":
         if not selected or selected not in task_map:
-            raise HTTPException(status_code=400, detail="selected node is required for selected mode")
+            raise HTTPException(
+                status_code=400, detail="selected node is required for selected mode"
+            )
         run_tasks = collect_dependencies(task_map[selected])
         run_task_ids = {task.id for task in run_tasks}
         roots = [
             task
             for task in run_tasks
             if not task.internal_loop_task
-            and not any(parent.id in run_task_ids and not parent.internal_loop_task for parent in task.parents)
+            and not any(
+                parent.id in run_task_ids and not parent.internal_loop_task
+                for parent in task.parents
+            )
         ]
     else:
         run_task_ids = set(task_map.keys())
@@ -832,10 +945,14 @@ def _queue_run(
         ]
 
     if not roots:
-        raise HTTPException(status_code=400, detail="Concert has no executable root nodes")
+        raise HTTPException(
+            status_code=400, detail="Concert has no executable root nodes"
+        )
 
     run_timestamp = _run_timestamp()
-    output_replay_id = None if replay else ReplayDataStore.replay_id_for_timestamp(run_timestamp)
+    output_replay_id = (
+        None if replay else ReplayDataStore.replay_id_for_timestamp(run_timestamp)
+    )
     node_states = _initial_node_states(task_map)
     for node_id, state in node_states.items():
         if node_id not in run_task_ids:
@@ -871,34 +988,38 @@ def _queue_run(
         "inputVariables": input_variables or [],
     }
     source_replay_id = replay_id if replay else output_replay_id
-    cache_id = CacheDataStore._safe_name(source_replay_id)
-    cache_metadata = {
-        "id": cache_id,
-        "runId": run_id,
-        "concertName": concert_name,
-        "createdAt": _now(),
-        "mode": mode,
-        "selected": selected,
-        "replay": replay,
-        "sourceReplayId": source_replay_id,
-        "trigger": trigger,
-        **source_metadata,
-        "params": params,
-        "inputParams": caller_input_params,
-        "globalVariables": global_variables or [],
-        "inputVariables": input_variables or [],
-        "status": "queued",
-        "nodes": cache_node_states,
-        "timing": {
-            "totalElapsedMs": 0,
-            "buildConcertMs": build_duration_ms,
-            "executionMs": 0,
-            "replaySaveMs": 0,
-            "executionReplayMs": 0,
-            "cacheSaveMs": 0,
-            "executionReplayCacheMs": 0,
-        },
-    }
+    cache_id = CacheDataStore._safe_name(source_replay_id) if cache_enabled else None
+    cache_metadata = (
+        {
+            "id": cache_id,
+            "runId": run_id,
+            "concertName": concert_name,
+            "createdAt": _now(),
+            "mode": mode,
+            "selected": selected,
+            "replay": replay,
+            "sourceReplayId": source_replay_id,
+            "trigger": trigger,
+            **source_metadata,
+            "params": params,
+            "inputParams": caller_input_params,
+            "globalVariables": global_variables or [],
+            "inputVariables": input_variables or [],
+            "status": "queued",
+            "nodes": cache_node_states,
+            "timing": {
+                "totalElapsedMs": 0,
+                "buildConcertMs": build_duration_ms,
+                "executionMs": 0,
+                "replaySaveMs": 0,
+                "executionReplayMs": 0,
+                "cacheSaveMs": 0,
+                "executionReplayCacheMs": 0,
+            },
+        }
+        if cache_enabled
+        else None
+    )
 
     with runs_lock:
         runs[run_id] = {
@@ -934,9 +1055,13 @@ def _queue_run(
                 "folder": f"{concert_name}/{replay_id if replay else output_replay_id}",
             },
             "cache": {
-                "enabled": True,
+                "enabled": cache_enabled,
                 "cacheId": cache_id,
-                "folder": f"{concert_name}/{source_replay_id}/cache",
+                "folder": (
+                    f"{concert_name}/{source_replay_id}/cache"
+                    if cache_enabled
+                    else None
+                ),
             },
         }
 
@@ -965,6 +1090,49 @@ def _queue_run(
         "executorId": EXECUTOR_ID,
         "replayRoot": os.path.abspath(REPLAY_ROOT),
     }
+
+
+def _queue_timer(timer):
+    try:
+        concert = concert_store.load(timer["concertName"])
+    except FileNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+    return _queue_run(
+        concert_name=concert.get("name") or timer["concertName"],
+        concert_id=concert["concertId"],
+        nodes=concert["nodes"],
+        edges=concert["edges"],
+        params=timer.get("params", {}),
+        global_variables=concert["globalVariables"],
+        input_variables=concert["inputVariables"],
+        trigger="scheduler",
+        cache_enabled=False,
+    )
+
+
+@app.get("/timers")
+def list_timers():
+    return {"timers": timer_manager.list()}
+
+
+@app.put("/timers")
+def save_timers(req: TimerBatchRequest):
+    try:
+        items = [item.model_dump() for item in req.timers]
+        for item in items:
+            concert_store.load(item["concertName"])
+        return {"timers": timer_manager.replace_all(items)}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _timer_run_state(run_id):
+    with runs_lock:
+        if run_id in runs:
+            return runs[run_id]
+    return CacheDataStore.load_run(REPLAY_ROOT, run_id)
 
 
 @app.post("/scheduler/run")

@@ -346,17 +346,20 @@ function InputColumnsPanel({ inputDataframes = [] }) {
       <div className="column-title">Input Columns</div>
       {inputDataframes.length ? (
         <>
-          <div className="python-input-tabs">
-            {inputDataframes.map((input) => (
-              <button
-                className={`python-input-tab ${activeInput?.id === input.id ? "active" : ""}`}
-                key={input.id}
-                onClick={() => setActiveInputId(input.id)}
-                title={input.name}
-              >
-                {input.name}
-              </button>
-            ))}
+          <div className="python-input-selector">
+            <label htmlFor="python-input-parent">Parent node</label>
+            <select
+              id="python-input-parent"
+              onChange={(event) => setActiveInputId(event.target.value)}
+              title={activeInput?.name}
+              value={activeInput?.id || ""}
+            >
+              {inputDataframes.map((input) => (
+                <option key={input.id} value={input.id}>
+                  {input.name}
+                </option>
+              ))}
+            </select>
           </div>
           <ColumnList
             columns={activeInput?.columns || []}

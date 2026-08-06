@@ -29,6 +29,28 @@ export default function Flow() {
     };
   const selectedApiBaseUrl = `http://${selectedServer.host}:${selectedServer.port}`;
 
+  const changeServer = async (nextServerName) => {
+    if (nextServerName === selectedServerName) return true;
+    const nextServer = servers.find((server) => server.name === nextServerName);
+    if (!nextServer) {
+      window.alert(`Server not found: ${nextServerName}.`);
+      return false;
+    }
+    const nextApiBaseUrl = `http://${nextServer.host}:${nextServer.port}`;
+    try {
+      const response = await fetch(`${nextApiBaseUrl}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      const body = response.ok ? await response.json() : null;
+      if (!response.ok || body?.status !== "ok") throw new Error();
+      setSelectedServerName(nextServerName);
+      return true;
+    } catch {
+      window.alert(`No response from server: ${nextServerName}.`);
+      return false;
+    }
+  };
+
   useEffect(() => {
     fetch("http://localhost:8000/servers")
       .then((response) => response.json())
@@ -115,24 +137,22 @@ export default function Flow() {
                 >
                   Close
                 </button>
-                <button
-                  onClick={() => {
-                    setActiveMenu(null);
-                    setShowStageResources(true);
-                  }}
-                >
-                  <span>Stage Resources</span>
-                  <span className="server-menu-badge">{selectedServerName}</span>
-                </button>
               </div>
             )}
           </div>
           <div className="menu-root">
-            <button className="menu-button" onClick={() => setActiveMenu(activeMenu === "deploy" ? null : "deploy")}>Deploy</button>
+            <button className="menu-button" onClick={() => setActiveMenu(activeMenu === "deploy" ? null : "deploy")}>Stage</button>
             {activeMenu === "deploy" && (
               <div className="menu-popover">
-                <button onClick={() => { setActiveMenu(null); setDeploySourceName(tabViewRef.current?.activeConcertName() || ""); setDeployTarget("selected"); }}><span>Deploy to</span><span className="server-menu-badge">{selectedServerName}</span></button>
-                <button onClick={() => { setActiveMenu(null); setShowConcertManager(true); }}>Concert Manager</button>
+                <div className="stage-menu-server">
+                  <span>Server</span>
+                  <strong>{selectedServerName}</strong>
+                </div>
+                <button onClick={() => { setActiveMenu(null); setShowStageResources(true); }}>
+                  Stage Resources
+                </button>
+                <button onClick={() => { setActiveMenu(null); setDeploySourceName(tabViewRef.current?.activeConcertName() || ""); setDeployTarget("selected"); }}>Rehearsal</button>
+                <button onClick={() => { setActiveMenu(null); setShowConcertManager(true); }}>Stage Manager</button>
               </div>
             )}
           </div>
@@ -150,7 +170,7 @@ export default function Flow() {
         </nav>
         <div className="server-selector">
           <span>Server</span>
-          <select value={selectedServerName} onChange={(event) => setSelectedServerName(event.target.value)}>
+          <select value={selectedServerName} onChange={(event) => { void changeServer(event.target.value); }}>
             {servers.map((server) => <option key={server.name} value={server.name}>{server.name}</option>)}
           </select>
         </div>
@@ -182,13 +202,14 @@ export default function Flow() {
             defaultServerName={selectedServerName}
             defaultApiBaseUrl={selectedApiBaseUrl}
             servers={servers}
-            onServerChange={setSelectedServerName}
+            onServerChange={changeServer}
           />
         </div>
       </main>
       {showStageResources && (
         <StageResourcesDialog
           apiBaseUrl={selectedApiBaseUrl}
+          serverName={selectedServerName}
           onClose={() => setShowStageResources(false)}
         />
       )}
@@ -211,7 +232,7 @@ export default function Flow() {
             if (!response.ok) {
               const body = await response.json().catch(() => null);
               const detail = body?.detail;
-              throw new Error(typeof detail === "string" ? detail : detail?.code === "VERSION_MISMATCH" ? `Production version is ${detail.currentVersion}.` : `Deploy failed (${response.status}).`);
+              throw new Error(typeof detail === "string" ? detail : detail?.code === "VERSION_MISMATCH" ? `Production version is ${detail.currentVersion}.` : `Rehearsal failed (${response.status}).`);
             }
             return response.json();
           }}

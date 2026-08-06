@@ -330,10 +330,11 @@ export default function ReplayDialog({
             <span>Server</span>
             <select
               value={serverName}
-              onChange={(event) => {
+              onChange={async (event) => {
+                const changed = await onServerChange(event.target.value);
+                if (!changed) return;
                 setDraftReplayId("");
                 onSelect("");
-                onServerChange(event.target.value);
               }}
             >
               {servers.map((server) => (

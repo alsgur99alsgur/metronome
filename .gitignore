@@ -9,5 +9,10 @@ frontend/dist/
 *.zip
 
 backend/connections.json
+backend/replay/
 .env
 .env.*
+
+*.concert
+
+timers.json

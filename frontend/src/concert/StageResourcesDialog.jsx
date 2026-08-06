@@ -16,7 +16,7 @@ const emptyDataframe = {
   truncated: false,
 };
 
-export default function StageResourcesDialog({ apiBaseUrl, onClose }) {
+export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }) {
   const [resources, setResources] = useState([]);
   const [kind, setKind] = useState("cache");
   const [name, setName] = useState("");
@@ -67,7 +67,7 @@ export default function StageResourcesDialog({ apiBaseUrl, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <section className="variable-dialog stage-resources-dialog" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-header"><div><div className="eyebrow">Stage</div><h2>Stage Resources</h2></div><button onClick={onClose}>Close</button></div>
+        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Resources</h2></div><button onClick={onClose}>Close</button></div>
         <div className="stage-resource-create">
           <select value={kind} onChange={(event) => setKind(event.target.value)}><option value="cache">Cache</option><option value="file">File</option></select>
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="resource_name" />

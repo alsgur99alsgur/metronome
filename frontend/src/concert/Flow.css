@@ -6,6 +6,8 @@ body {
   margin: 0;
   background: #f6f7f9;
   color: #111827;
+  font-size: 13px;
+  line-height: 1.4;
   font-family:
     Inter,
     ui-sans-serif,
@@ -16,15 +18,22 @@ body {
     sans-serif;
 }
 
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 button {
-  height: 32px;
+  height: 28px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #ffffff;
   color: #111827;
   cursor: pointer;
   font-weight: 600;
-  padding: 0 12px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 
@@ -52,7 +61,7 @@ button:disabled {
 }
 
 .icon-button {
-  width: 32px;
+  width: 28px;
   padding: 0;
 }
 
@@ -67,26 +76,26 @@ button:disabled {
 .toolbar {
   position: relative;
   z-index: 70;
-  min-height: 44px;
+  min-height: 38px;
   border-bottom: 1px solid #d7dce2;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
+  gap: 10px;
+  padding: 5px 10px;
   background: #ffffff;
   overflow: visible;
 }
 
 .brand {
   font-weight: 800;
-  min-width: 128px;
+  min-width: 112px;
 }
 
 .toolbar-group {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  gap: 8px;
+  gap: 6px;
 }
 
 .menu-bar {
@@ -116,7 +125,7 @@ button:disabled {
   top: calc(100% + 6px);
   left: 0;
   z-index: 80;
-  min-width: 220px;
+  min-width: 190px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #ffffff;
@@ -135,6 +144,28 @@ button:disabled {
 
 .menu-popover button:hover {
   background: #f1f5f9;
+}
+
+.stage-menu-server {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 8px 8px;
+}
+
+.stage-menu-server strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .server-menu-badge {
@@ -178,7 +209,7 @@ button:disabled {
 }
 
 .replay-select {
-  height: 32px;
+  height: 28px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #ffffff;
@@ -191,7 +222,7 @@ button:disabled {
 
 .selected-replay-chip {
   max-width: 260px;
-  height: 28px;
+  height: 26px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #f8fafc;
@@ -211,7 +242,7 @@ button:disabled {
 }
 
 .replay-select {
-  min-width: 210px;
+  min-width: 180px;
 }
 
 .concert-tab-view {
@@ -2105,8 +2136,7 @@ th {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
   padding-bottom: 3px;
 }
 
@@ -2238,30 +2268,31 @@ th {
   overflow: hidden;
 }
 
-.python-input-tabs {
-  display: flex;
-  gap: 4px;
+.python-input-selector {
+  flex: 0 0 auto;
   border-bottom: 1px solid #eef1f4;
-  overflow-x: auto;
   padding: 6px;
 }
 
-.python-input-tab {
-  max-width: 130px;
-  height: 28px;
-  overflow: hidden;
-  border-color: transparent;
-  background: #f8fafc;
+.python-input-selector label {
+  display: block;
+  margin-bottom: 5px;
   color: #475569;
-  font-size: 12px;
-  padding: 0 8px;
-  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 800;
 }
 
-.python-input-tab.active {
-  border-color: #2563eb;
-  background: #eff6ff;
-  color: #1d4ed8;
+.python-input-selector select {
+  width: 100%;
+  height: 30px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #334155;
+  padding: 0 8px;
+  text-overflow: ellipsis;
 }
 
 .column-title {
@@ -2274,6 +2305,7 @@ th {
 
 .column-list {
   min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
   padding: 6px;
 }
@@ -2771,4 +2803,229 @@ th {
   flex: 1;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
+}
+
+/* Compact desktop density tuned for a 1920 x 1080 workspace. */
+@media (max-width: 1920px) and (max-height: 1080px) {
+  .concert-tab-shell {
+    grid-template-rows: 34px 38px minmax(0, 1fr);
+  }
+
+  .concert-tab-shell.empty {
+    grid-template-rows: 34px minmax(0, 1fr);
+  }
+
+  .concert-workspace {
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+
+  .tab-strip {
+    gap: 3px;
+    padding: 4px 8px 0;
+  }
+
+  .tab-button,
+  .tab-new-button {
+    height: 29px;
+  }
+
+  .tab-button {
+    max-width: 210px;
+    gap: 6px;
+  }
+
+  .tab-new-button {
+    width: 29px;
+    font-size: 16px;
+  }
+
+  .sub-toolbar {
+    gap: 6px;
+    padding: 5px 8px;
+  }
+
+  .concert-list-pane {
+    min-width: 250px;
+  }
+
+  .concert-list-title {
+    padding: 8px 10px;
+  }
+
+  .concert-list-title select,
+  .concert-list-close {
+    height: 26px;
+  }
+
+  .concert-list-close {
+    width: 26px;
+    font-size: 18px;
+  }
+
+  .concert-list-browser {
+    grid-template-columns: 145px minmax(0, 1fr);
+  }
+
+  .concert-list-folders button {
+    min-height: 27px;
+  }
+
+  .node-palette {
+    padding: 10px 8px;
+  }
+
+  .palette-group {
+    gap: 10px;
+    padding: 10px 0;
+  }
+
+  .palette-item {
+    width: 66px;
+    gap: 4px;
+  }
+
+  .palette-node {
+    width: 48px;
+    height: 48px;
+  }
+
+  .palette-label {
+    max-width: 66px;
+    font-size: 10px;
+  }
+
+  .concert-bottom-panel {
+    grid-template-rows: 31px minmax(0, 1fr);
+  }
+
+  .concert-bottom-tab {
+    height: 27px;
+    padding: 0 11px;
+  }
+
+  .concert-search-header,
+  .concert-output-header {
+    height: 46px;
+    gap: 8px;
+    padding: 6px 10px;
+  }
+
+  .concert-search-header h2,
+  .concert-output-header h2 {
+    font-size: 14px;
+  }
+
+  .concert-search-input,
+  .concert-search-scope {
+    height: 28px;
+  }
+
+  .concert-search-row,
+  .concert-output-row {
+    min-height: 34px;
+    padding: 5px 8px;
+  }
+
+  .status-panel {
+    padding: 12px;
+  }
+
+  .status-panel h2,
+  .editor-panel h2,
+  .data-viewer h2 {
+    font-size: 15px;
+  }
+
+  .editor-modal-backdrop {
+    padding: 16px;
+  }
+
+  .editor-panel {
+    width: min(1360px, calc(100vw - 32px));
+    height: calc(100vh - 32px);
+    padding: 14px;
+  }
+
+  .editor-header {
+    margin-bottom: 10px;
+  }
+
+  .editor-actions {
+    margin-top: 10px;
+  }
+
+  .node-editor-grid,
+  .concert-call-editor-grid {
+    grid-template-columns: 230px minmax(0, 1fr) 230px;
+    gap: 10px;
+  }
+
+  .resource-editor-grid {
+    grid-template-columns: 230px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .text-input,
+  .resource-name-select {
+    height: 30px;
+  }
+
+  .text-area {
+    font-size: 12px;
+    padding: 8px;
+  }
+
+  .column-title {
+    padding: 7px 8px;
+  }
+
+  .column-row {
+    min-height: 29px;
+    padding: 4px;
+  }
+
+  .save-dialog,
+  .run-complete-dialog,
+  .data-viewer,
+  .variable-dialog,
+  .replay-dialog {
+    padding: 14px;
+  }
+
+  .save-dialog h3,
+  .running-dialog h2,
+  .run-complete-dialog h3 {
+    font-size: 17px;
+  }
+
+  .running-dialog {
+    gap: 10px;
+    padding: 22px 20px 20px;
+  }
+
+  .replay-dialog {
+    height: min(780px, calc(100vh - 28px));
+  }
+
+  .replay-tree-view {
+    height: 420px;
+  }
+
+  table {
+    font-size: 12px;
+  }
+
+  th,
+  td {
+    padding: 6px 8px;
+  }
+
+  .deploy-dialog-grid {
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .concert-manager {
+    height: min(700px, calc(100vh - 48px));
+  }
 }

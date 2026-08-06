@@ -49,7 +49,7 @@ export default function ConcertManagerDialog({ apiBaseUrl, serverName, onClose }
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
       <section className="variable-dialog concert-manager" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Concert Manager</h2></div><div className="concert-manager-actions"><button disabled={!canMove || busy} onClick={openMove}>Move Folder</button><button className="danger-button" disabled={!selected || busy} onClick={() => window.confirm(`Delete ${selected.path}?`) && request("/deployments", { kind: selected.kind, path: selected.path }, "DELETE")}>Delete</button><button disabled={busy} onClick={onClose}>Close</button></div></div>
+        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Manager</h2></div><div className="concert-manager-actions"><button disabled={!canMove || busy} onClick={openMove}>Move Folder</button><button className="danger-button" disabled={!selected || busy} onClick={() => window.confirm(`Delete ${selected.path}?`) && request("/deployments", { kind: selected.kind, path: selected.path }, "DELETE")}>Delete</button><button disabled={busy} onClick={onClose}>Close</button></div></div>
         {error && <div className="dialog-error">{error}</div>}
         <ConcertListPanel
           apiBaseUrl={apiBaseUrl}
