@@ -17,7 +17,7 @@ class TaskTimeout(Exception):
     pass
 
 
-REPLAY_TASK_TYPES = ("dbRead", "concertInput", "concert", "cacheRead", "fileRead")
+REPLAY_TASK_TYPES = ("dbRead", "concertInput", "concert", "cacheRead", "fileRead", "opl")
 SIDE_EFFECT_TASK_TYPES = ("dbWrite", "cacheWrite", "fileWrite")
 LOOP_STOP_OPERATORS = {"==", "!=", ">=", ">", "<=", "<"}
 EXECUTOR_WORKERS = config_int("executor", "workers")

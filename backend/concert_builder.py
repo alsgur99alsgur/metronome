@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from oracle_client import execute_oracle_query_records, execute_oracle_write_records
+from opl_builder import build_and_solve_opl
 from task import Task
 
 
@@ -24,10 +25,11 @@ SINGLE_PARENT_TARGET_TYPES = {
     "cacheWrite",
     "fileWrite",
     "loopIn",
+    "loopOut",
 }
 NO_PARENT_TARGET_TYPES = {"concertInput"}
 NO_CHILD_SOURCE_TYPES = {"concertOutput"}
-REPLAY_TASK_TYPES = {"dbRead", "concertInput", "concert", "cacheRead", "fileRead"}
+REPLAY_TASK_TYPES = {"dbRead", "concertInput", "concert", "cacheRead", "fileRead", "opl"}
 LOOP_NODE_TYPES = {"loopIn", "loopOut"}
 
 
@@ -43,6 +45,11 @@ def _safe_identifier(value):
 @lru_cache(maxsize=4096)
 def _rewrite_sql_variables(sql):
     return _CONCERT_VAR_PATTERN.sub(r":\1", sql or "")
+
+
+@lru_cache(maxsize=4096)
+def _rewrite_pandas_query_variables(condition):
+    return _CONCERT_VAR_PATTERN.sub(r"@\1", condition or "")
 
 
 @lru_cache(maxsize=4096)
@@ -95,6 +102,13 @@ def _runtime_params(global_variables=None, input_variables=None, params=None):
         name = str(key)[1:] if str(key).startswith("$") else str(key)
         result[name] = value
     return result
+
+
+def _resolve_connection(connection, params):
+    value = str(connection or "").strip()
+    if value.startswith("$"):
+        return str((params or {}).get(value[1:], "") or "")
+    return value
 
 
 def _parse_mapping(value):
@@ -202,10 +216,10 @@ def _bind_records_from_inputs(inputs, params):
 
 def _build_db_read_task(task_id, name, data, params):
     sql = _rewrite_sql_variables(data.get("sql", ""))
-    connection = data.get("connection", "")
 
     def db_read(inputs):
         print(f"QUERY {name}")
+        connection = _resolve_connection(data.get("connection", ""), params)
         bind_records = _bind_records_from_inputs(inputs, params)
         result = execute_oracle_query_records(connection, sql, bind_records)
         if result.attrs.get("pm_fallback"):
@@ -244,11 +258,29 @@ def _build_python_task(task_id, name, data, params):
     return Task(task_id, name, "python", python)
 
 
+def _build_opl_task(task_id, name, data):
+    task = None
+
+    def opl(inputs):
+        input_dataframes = {
+            parent.id: value for parent, value in zip(task.parents, inputs)
+        }
+        return build_and_solve_opl(
+            {**data, "name": name},
+            input_dataframes,
+            artifact_dirs=task.model_artifact_dirs,
+            node_id=task.id,
+        )
+
+    task = Task(task_id, name, "opl", opl)
+    return task
+
+
 def _build_db_write_task(task_id, name, data, params):
     sql = _rewrite_sql_variables(data.get("sql", ""))
-    connection = data.get("connection", "")
 
     def db_write(inputs):
+        connection = _resolve_connection(data.get("connection", ""), params)
         if not inputs:
             bind_records = [params]
             result = pd.DataFrame()
@@ -300,12 +332,12 @@ def _build_resource_read_task(task_id, name, data, resource_store, run_id):
     return Task(task_id, name, f"{kind}Read", read_resource)
 
 
-def _build_resource_write_task(task_id, name, data, resource_store, run_id):
+def _build_resource_write_task(task_id, name, data, params, resource_store, run_id):
     kind = "cache" if data.get("resourceKind") == "cache" else "file"
     scope = data.get("scope", "")
     resource_name = data.get("resourceName", "")
     operation = data.get("operation", "")
-    condition = data.get("condition", "")
+    condition = _rewrite_pandas_query_variables(data.get("condition", ""))
 
     def write_resource(inputs):
         if operation == "append":
@@ -328,6 +360,7 @@ def _build_resource_write_task(task_id, name, data, resource_store, run_id):
                 scope,
                 resource_name,
                 condition,
+                variables=params,
                 run_id=run_id,
             )
             return inputs[0] if inputs else pd.DataFrame()
@@ -529,6 +562,62 @@ def _link_tasks(parent, child):
     parent >> child
 
 
+def selected_concert_graph(nodes, edges, selected_id):
+    node_by_id = {node["id"]: node for node in nodes}
+    if selected_id not in node_by_id:
+        raise ValueError("Selected node is required for selected mode.")
+
+    valid_edges = [
+        edge
+        for edge in edges
+        if edge.get("source") in node_by_id and edge.get("target") in node_by_id
+    ]
+    parents_by_target = {}
+    for edge in valid_edges:
+        parents_by_target.setdefault(edge["target"], []).append(edge["source"])
+
+    children_by_source = _children_by_source(valid_edges)
+    node_type_by_id = {
+        node_id: node.get("type") for node_id, node in node_by_id.items()
+    }
+    included = {selected_id}
+
+    while True:
+        previous = set(included)
+
+        stack = list(included)
+        while stack:
+            node_id = stack.pop()
+            for parent_id in parents_by_target.get(node_id, []):
+                if parent_id not in included:
+                    included.add(parent_id)
+                    stack.append(parent_id)
+
+        for loop_in_id in list(included):
+            if node_type_by_id.get(loop_in_id) != "loopIn":
+                continue
+            loop_out_id = _matching_loop_out(
+                loop_in_id, children_by_source, node_type_by_id
+            )
+            if not loop_out_id:
+                raise ValueError(f"Loop In has no reachable Loop Out: {loop_in_id}")
+            included.update(
+                _reachable_until(children_by_source, loop_in_id, loop_out_id)
+            )
+
+        if included == previous:
+            break
+
+    return (
+        [node for node in nodes if node["id"] in included],
+        [
+            edge
+            for edge in valid_edges
+            if edge["source"] in included and edge["target"] in included
+        ],
+    )
+
+
 def build_concert(
     nodes,
     edges,
@@ -559,6 +648,8 @@ def build_concert(
             task_map[task_id] = _build_db_read_task(task_id, name, data, params)
         elif node_type == "python":
             task_map[task_id] = _build_python_task(task_id, name, data, params)
+        elif node_type == "opl":
+            task_map[task_id] = _build_opl_task(task_id, name, data)
         elif node_type == "dbWrite":
             task_map[task_id] = _build_db_write_task(task_id, name, data, params)
         elif node_type == "concertInput":
@@ -579,7 +670,7 @@ def build_concert(
             if resource_store is None:
                 raise RuntimeError("Resource store is not configured.")
             task_map[task_id] = _build_resource_write_task(
-                task_id, name, data, resource_store, run_id
+                task_id, name, data, params, resource_store, run_id
             )
         elif node_type == "concert":
             task_map[task_id] = _build_concert_call_task(

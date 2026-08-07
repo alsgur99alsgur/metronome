@@ -119,6 +119,7 @@ class CacheDataStore:
         with self.lock:
             self.metadata.setdefault("nodes", {})[task.id] = node
             self.metadata["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+            self._write_metadata()
 
     @classmethod
     def _cache_paths(cls, replay_root="./replay"):
@@ -142,10 +143,15 @@ class CacheDataStore:
 
     @classmethod
     def find_cache(cls, replay_root, cache_id):
+        requested_cache_id = str(cache_id)
         safe_cache_id = cls._safe_name(cache_id)
         safe_replay_id = cls._safe_replay_id(cache_id)
         for concert_name, current_cache_id, cache_path, replay_id, metadata in cls._cache_paths(replay_root):
-            if current_cache_id == safe_cache_id or metadata.get("sourceReplayId") == safe_replay_id:
+            if (
+                current_cache_id == safe_cache_id
+                or metadata.get("sourceReplayId") == safe_replay_id
+                or metadata.get("runId") == requested_cache_id
+            ):
                 return concert_name, current_cache_id, cache_path, metadata
         return None
 
@@ -211,7 +217,14 @@ class CacheDataStore:
         }
 
     @classmethod
-    def load_node_result(cls, base_path, cache_id, node_id, max_grid_rows=1000):
+    def load_node_result(
+        cls,
+        base_path,
+        cache_id,
+        node_id,
+        max_grid_rows=1000,
+        offset=0,
+    ):
         found = cls.find_cache(base_path, cache_id)
         if not found:
             raise FileNotFoundError(f"Cache not found: {cache_id}")
@@ -221,7 +234,7 @@ class CacheDataStore:
             raise FileNotFoundError(f"Cache data not found for node: {node_id}")
         df = pd.read_parquet(os.path.join(cache_path, node["file"]))
         dtypes = {str(column): str(dtype) for column, dtype in df.dtypes.items()}
-        grid_df = df.head(max_grid_rows).astype(object)
+        grid_df = df.iloc[offset : offset + max_grid_rows].astype(object)
         grid_df = grid_df.where(pd.notnull(grid_df), None)
         grid_df = grid_df.replace({float("inf"): None, float("-inf"): None})
         data = grid_df.to_dict(orient="records")
@@ -233,5 +246,23 @@ class CacheDataStore:
             "preview": data[:20],
             "data": data,
             "dataLimit": max_grid_rows,
-            "truncated": len(df) > max_grid_rows,
+            "offset": offset,
+            "returnedRows": len(data),
+            "hasMore": offset + len(data) < len(df),
+            "truncated": offset + len(data) < len(df),
         }
+
+    @classmethod
+    def load_model_artifact(cls, base_path, cache_id, node_id, file_format="lp"):
+        if file_format not in {"lp", "mps"}:
+            raise ValueError(f"Unsupported model format: {file_format}")
+        found = cls.find_cache(base_path, cache_id)
+        if not found:
+            raise FileNotFoundError(f"Cache not found: {cache_id}")
+        _, _, cache_path, _ = found
+        safe_node_id = cls._safe_name(node_id)
+        path = os.path.join(cache_path, f"{safe_node_id}.{file_format}")
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Model artifact not found for node: {node_id}")
+        with open(path, "r", encoding="utf-8", errors="replace") as file:
+            return file.read()

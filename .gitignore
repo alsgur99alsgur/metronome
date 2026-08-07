@@ -13,6 +13,8 @@ backend/replay/
 .env
 .env.*
 
+events.md
+
 *.concert
 
-timers.json
+*.json

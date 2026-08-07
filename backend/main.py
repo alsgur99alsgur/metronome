@@ -11,13 +11,13 @@ from uuid import uuid4
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from cache_data_store import CacheDataStore
 from concert_store import ConcertStore
-from deployment_store import DeploymentStore, VersionMismatchError
-from concert_builder import build_concert, collect_dependencies
+from deployment_store import DeploymentMismatchError, DeploymentStore
+from concert_builder import build_concert, collect_dependencies, selected_concert_graph
 from executor import Executor
 from oracle_client import (
     OracleUnavailable,
@@ -120,6 +120,8 @@ class DbReadDescribeRequest(BaseModel):
     connection: Optional[str] = None
     sql: str = ""
     params: dict[str, Any] = Field(default_factory=dict)
+    globalVariables: list = Field(default_factory=list)
+    inputVariables: list = Field(default_factory=list)
 
 
 class SchemaInferRequest(BaseModel):
@@ -140,7 +142,7 @@ class DeploymentRequest(BaseModel):
     concertId: str
     sourceName: str
     deploymentPath: str
-    allowVersionMismatch: bool = False
+    allowMismatch: bool = False
     version: str
     name: str
     nodes: list
@@ -216,6 +218,13 @@ def _runtime_params(global_variables=None, input_variables=None, params=None):
         result[name] = value
 
     return result
+
+
+def _resolve_connection(connection, params):
+    value = str(connection or "").strip()
+    if value.startswith("$"):
+        return str((params or {}).get(value[1:], "") or "")
+    return value
 
 
 def _params_for_variables(variables=None, params=None):
@@ -602,7 +611,7 @@ def save_concert(req: ConcertSaveRequest):
 
 
 def _deployment_error(exc):
-    if isinstance(exc, VersionMismatchError):
+    if isinstance(exc, DeploymentMismatchError):
         return HTTPException(status_code=409, detail=exc.detail)
     if isinstance(exc, FileExistsError):
         return HTTPException(status_code=409, detail=str(exc))
@@ -646,7 +655,7 @@ def deploy_rehearsal(req: DeploymentRequest):
             _deployment_payload(req),
             source_name=req.sourceName,
             deployment_name=req.deploymentPath,
-            allow_version_mismatch=req.allowVersionMismatch,
+            allow_mismatch=req.allowMismatch,
         )
     except (ValueError, FileExistsError, FileNotFoundError) as exc:
         raise _deployment_error(exc) from exc
@@ -692,7 +701,7 @@ def prepare_deployment(transaction_id: str, req: DeploymentRequest):
             _deployment_payload(req),
             source_name=req.sourceName,
             deployment_name=req.deploymentPath,
-            allow_version_mismatch=req.allowVersionMismatch,
+            allow_mismatch=req.allowMismatch,
         )
     except (ValueError, FileExistsError, FileNotFoundError) as exc:
         raise _deployment_error(exc) from exc
@@ -732,6 +741,14 @@ def create_deployment_directory(req: DeploymentDirectoryRequest):
     try:
         return deployment_store.create_directory(req.directory)
     except ValueError as exc:
+        raise _deployment_error(exc) from exc
+
+
+@app.delete("/deployments/directories")
+def delete_deployment_directory(req: DeploymentDirectoryRequest):
+    try:
+        return deployment_store.delete_directory(req.directory)
+    except (ValueError, FileNotFoundError) as exc:
         raise _deployment_error(exc) from exc
 
 
@@ -821,7 +838,8 @@ def test_admin_connection(req: AdminConnectionTestRequest):
 
 @app.post("/db-read/describe")
 def describe_db_read(req: DbReadDescribeRequest):
-    connection = req.connection or ""
+    default_params = _runtime_params(req.globalVariables, req.inputVariables)
+    connection = _resolve_connection(req.connection, default_params)
     if not connection:
         return {
             "columns": [],
@@ -847,7 +865,7 @@ def describe_db_read(req: DbReadDescribeRequest):
 
 @app.post("/schema/infer")
 def infer_schema(req: SchemaInferRequest):
-    params = _runtime_params(req.globalVariables, req.inputVariables, req.params)
+    params = _runtime_params(req.globalVariables, req.inputVariables)
     return infer_concert_columns(
         req.nodes,
         req.edges,
@@ -904,10 +922,17 @@ def _queue_run(
     caller_input_params = _params_for_variables(input_variables, params)
     run_started_at = time.time()
     run_id = str(uuid4())
+    build_nodes = nodes
+    build_edges = edges
+    if mode == "selected":
+        try:
+            build_nodes, build_edges = selected_concert_graph(nodes, edges, selected)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     build_start = time.time()
     task_map = build_concert(
-        nodes,
-        edges,
+        build_nodes,
+        build_edges,
         params=params,
         concert_root=CONCERT_ROOT,
         replay_root=REPLAY_ROOT,
@@ -954,6 +979,23 @@ def _queue_run(
         None if replay else ReplayDataStore.replay_id_for_timestamp(run_timestamp)
     )
     node_states = _initial_node_states(task_map)
+    for node in nodes:
+        node_id = node["id"]
+        if node_id in node_states:
+            continue
+        node_states[node_id] = {
+            "id": node_id,
+            "name": (node.get("data") or {}).get("name", node_id),
+            "type": node.get("type", ""),
+            "status": "pending",
+            "logs": "",
+            "error": None,
+            "result": None,
+            "durationMs": None,
+            "cacheDurationMs": None,
+            "loopIterations": None,
+            "updatedAt": _now(),
+        }
     for node_id, state in node_states.items():
         if node_id not in run_task_ids:
             state["status"] = "skipped"
@@ -1020,6 +1062,19 @@ def _queue_run(
         if cache_enabled
         else None
     )
+
+    replay_artifact_dir = os.path.join(
+        REPLAY_ROOT,
+        ReplayDataStore._safe_name(concert_name),
+        ReplayDataStore._safe_replay_id(source_replay_id),
+    )
+    cache_artifact_dir = os.path.join(replay_artifact_dir, "cache")
+    for task in task_map.values():
+        if task.type != "opl":
+            continue
+        task.model_artifact_dirs = [replay_artifact_dir]
+        if cache_enabled:
+            task.model_artifact_dirs.append(cache_artifact_dir)
 
     with runs_lock:
         runs[run_id] = {
@@ -1189,14 +1244,22 @@ def get_run(run_id: str, includeData: bool = Query(default=False)):
 
 
 @app.get("/runs/{run_id}/nodes/{node_id}/data")
-def get_run_node_data(run_id: str, node_id: str):
+def get_run_node_data(
+    run_id: str,
+    node_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=1000, ge=1, le=5000),
+):
+    cache_id = run_id
     with runs_lock:
         if run_id in runs:
-            node = runs[run_id].get("nodes", {}).get(node_id)
+            run_state = runs[run_id]
+            node = run_state.get("nodes", {}).get(node_id)
             if node is None:
                 raise HTTPException(status_code=404, detail="node not found")
+            cache_id = run_state.get("cache", {}).get("cacheId") or run_id
             result = node.get("result")
-            if result is not None:
+            if result is not None and result.get("kind") != "dataframe":
                 return {
                     "runId": run_id,
                     "nodeId": node_id,
@@ -1206,8 +1269,46 @@ def get_run_node_data(run_id: str, node_id: str):
         return {
             "runId": run_id,
             "nodeId": node_id,
-            "result": CacheDataStore.load_node_result(REPLAY_ROOT, run_id, node_id),
+            "result": CacheDataStore.load_node_result(
+                REPLAY_ROOT,
+                cache_id,
+                node_id,
+                max_grid_rows=limit,
+                offset=offset,
+            ),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/opl/model", response_class=PlainTextResponse)
+def get_opl_model(
+    concertName: str = Query(...),
+    nodeId: str = Query(...),
+    format: str = Query(default="lp", pattern="^(lp|mps)$"),
+    cacheId: Optional[str] = Query(default=None),
+    replayId: Optional[str] = Query(default=None),
+):
+    if not cacheId and not replayId:
+        raise HTTPException(status_code=400, detail="cacheId or replayId is required")
+    if cacheId:
+        resolved_cache_id = cacheId
+        with runs_lock:
+            if cacheId in runs:
+                resolved_cache_id = (
+                    runs[cacheId].get("cache", {}).get("cacheId") or cacheId
+                )
+        try:
+            return CacheDataStore.load_model_artifact(
+                REPLAY_ROOT, resolved_cache_id, nodeId, format
+            )
+        except FileNotFoundError:
+            if not replayId:
+                raise HTTPException(status_code=404, detail="OPL model not found")
+    try:
+        return ReplayDataStore.load_model_artifact(
+            REPLAY_ROOT, concertName, replayId, nodeId, format
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

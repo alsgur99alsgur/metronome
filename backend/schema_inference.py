@@ -3,7 +3,12 @@ import re
 import numpy as np
 import pandas as pd
 
-from concert_builder import _compile_python_code, _rewrite_python_variables, _safe_identifier
+from concert_builder import (
+    _compile_python_code,
+    _resolve_connection,
+    _rewrite_python_variables,
+    _safe_identifier,
+)
 from oracle_client import describe_oracle_query
 
 
@@ -129,7 +134,7 @@ def infer_concert_columns(nodes, edges, params=None, start_node_id=None):
             if node_type == "dbRead":
                 sql = re.sub(r"\$([A-Za-z_][A-Za-z0-9_]*)", r":\1", data.get("sql", ""))
                 known[node_id] = describe_oracle_query(
-                    data.get("connection", ""),
+                    _resolve_connection(data.get("connection", ""), params),
                     sql,
                     params=_sql_with_binds(sql, params),
                 )

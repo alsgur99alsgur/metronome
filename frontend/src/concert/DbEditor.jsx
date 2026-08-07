@@ -79,6 +79,8 @@ export default function DbEditor({
   outputMessage = "No result columns.",
   describeEnabled = true,
   apiBaseUrl = "http://localhost:8000",
+  globalVariables = [],
+  inputVariables = [],
 }) {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
@@ -123,6 +125,8 @@ export default function DbEditor({
           body: JSON.stringify({
             connection: editData.connection || "",
             sql: editData.sql || "",
+            globalVariables,
+            inputVariables,
           }),
         });
         if (!response.ok) return;
@@ -144,7 +148,15 @@ export default function DbEditor({
       isMounted = false;
       window.clearTimeout(timeout);
     };
-  }, [apiBaseUrl, describeEnabled, editData.connection, editData.sql, setEditData]);
+  }, [
+    apiBaseUrl,
+    describeEnabled,
+    editData.connection,
+    editData.sql,
+    globalVariables,
+    inputVariables,
+    setEditData,
+  ]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -193,6 +205,24 @@ export default function DbEditor({
             {connection}
           </option>
         ))}
+        {(inputVariables || []).length > 0 && (
+          <optgroup label="Input Variables">
+            {inputVariables.map((variable) => (
+              <option value={variable.name} key={`input-${variable.name}`}>
+                {variable.name} ({String(variable.defaultValue ?? "")})
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {(globalVariables || []).length > 0 && (
+          <optgroup label="Global Variables">
+            {globalVariables.map((variable) => (
+              <option value={variable.name} key={`global-${variable.name}`}>
+                {variable.name} ({String(variable.value ?? "")})
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
 
       <label className="field-label">SQL</label>
@@ -209,7 +239,7 @@ export default function DbEditor({
               setEditorReady((current) => current + 1);
             }}
             options={{
-              fontSize: 14,
+              fontSize: 12,
               minimap: { enabled: false },
               automaticLayout: true,
             }}

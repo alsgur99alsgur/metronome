@@ -12,12 +12,14 @@ import StageResourcesDialog from "./StageResourcesDialog";
 export default function Flow() {
   const tabViewRef = useRef(null);
   const resizeRef = useRef(null);
+  const mainMenuRef = useRef(null);
   const [activeMenu, setActiveMenu] = useState(null);
   const [showStageResources, setShowStageResources] = useState(false);
   const [deployTarget, setDeployTarget] = useState(null);
   const [deploySourceName, setDeploySourceName] = useState("");
   const [showConcertManager, setShowConcertManager] = useState(false);
   const [showConcertList, setShowConcertList] = useState(true);
+  const [concertListRefreshKey, setConcertListRefreshKey] = useState(0);
   const [concertListWidth, setConcertListWidth] = useState(430);
   const [servers, setServers] = useState([]);
   const [selectedServerName, setSelectedServerName] = useState("Local");
@@ -61,6 +63,19 @@ export default function Flow() {
   }, []);
 
   useEffect(() => {
+    const closeMenuOutside = (event) => {
+      const menuRoot = event.target.closest?.(".menu-root");
+      if (!menuRoot || !mainMenuRef.current?.contains(menuRoot)) {
+        setActiveMenu(null);
+      }
+    };
+    document.addEventListener("pointerdown", closeMenuOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenuOutside, true);
+    };
+  }, []);
+
+  useEffect(() => {
     const move = (event) => {
       if (!resizeRef.current) return;
       const { startX, startWidth } = resizeRef.current;
@@ -85,7 +100,11 @@ export default function Flow() {
       <header className="toolbar">
         <div className="brand">Metronome</div>
 
-        <nav className="menu-bar" onClick={(event) => event.stopPropagation()}>
+        <nav
+          ref={mainMenuRef}
+          className="menu-bar"
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className="menu-root">
             <button
               className="menu-button"
@@ -182,6 +201,7 @@ export default function Flow() {
             <div className="concert-list-pane" style={{ width: concertListWidth }}>
               <ConcertListPanel
                 apiBaseUrl={selectedApiBaseUrl}
+                refreshKey={concertListRefreshKey}
                 onClose={() => setShowConcertList(false)}
                 openKinds={["concert", "rehearsal", "backup"]}
                 onOpen={(name, item) => tabViewRef.current?.openDeploymentConcert(item).catch((error) => window.alert(error.message))}
@@ -218,8 +238,9 @@ export default function Flow() {
           target={selectedServerName}
           sourceName={deploySourceName}
           apiBaseUrl={selectedApiBaseUrl}
+          onDirectoryCreated={() => setConcertListRefreshKey((value) => value + 1)}
           onClose={() => setDeployTarget(null)}
-          onDeploy={async (version, directory, allowVersionMismatch) => {
+          onDeploy={async (version, directory, allowMismatch) => {
             const baseName = deploySourceName.split("/").pop();
             const deploymentName = directory ? `${directory}/${baseName}` : baseName;
             const payload = await tabViewRef.current?.prepareDeployment(version, deploymentName);
@@ -227,19 +248,30 @@ export default function Flow() {
             const response = await fetch(`${selectedApiBaseUrl}/deployments/rehearsals`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ...payload, deploymentPath: deploymentName, sourceName: deploySourceName, allowVersionMismatch }),
+              body: JSON.stringify({ ...payload, deploymentPath: deploymentName, sourceName: deploySourceName, allowMismatch }),
             });
             if (!response.ok) {
               const body = await response.json().catch(() => null);
               const detail = body?.detail;
-              throw new Error(typeof detail === "string" ? detail : detail?.code === "VERSION_MISMATCH" ? `Production version is ${detail.currentVersion}.` : `Rehearsal failed (${response.status}).`);
+              const nextError = new Error(
+                typeof detail === "string"
+                  ? detail
+                  : detail?.message || `Rehearsal failed (${response.status}).`,
+              );
+              nextError.retryableMismatch = detail?.code === "DEPLOYMENT_MISMATCH";
+              throw nextError;
             }
             return response.json();
           }}
         />
       )}
       {showConcertManager && (
-        <ConcertManagerDialog apiBaseUrl={selectedApiBaseUrl} serverName={selectedServerName} onClose={() => setShowConcertManager(false)} />
+        <ConcertManagerDialog
+          apiBaseUrl={selectedApiBaseUrl}
+          serverName={selectedServerName}
+          onDeploymentChange={() => setConcertListRefreshKey((value) => value + 1)}
+          onClose={() => setShowConcertManager(false)}
+        />
       )}
     </div>
   );

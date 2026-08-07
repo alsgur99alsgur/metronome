@@ -98,22 +98,38 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
         </label>
       )}
       {write && (
-        <>
-          <label className="field-label">
-            Operation
-            <select value={operation} onChange={(event) => onChange({ ...data, operation: event.target.value })}>
-              <option value="append">Append input DataFrame</option>
-              <option value="delete">Delete matching rows</option>
-            </select>
-          </label>
+        <div className="resource-operation-section">
+          <div className="field-label">Operation</div>
+          <div className="resource-scope-radios">
+            <label>
+              <input
+                type="radio"
+                checked={operation === "append"}
+                onChange={() => onChange({ ...data, operation: "append" })}
+              />
+              Append
+            </label>
+            <label>
+              <input
+                type="radio"
+                checked={operation === "delete"}
+                onChange={() => onChange({ ...data, operation: "delete" })}
+              />
+              Delete
+            </label>
+          </div>
           {operation === "delete" && (
-            <label className="field-label">
-              pandas query condition
-              <textarea rows={4} value={data.condition || ""} onChange={(event) => onChange({ ...data, condition: event.target.value })} placeholder={"status == 'DONE' and amount > 0"} />
+            <label className="field-label resource-query-field">
+              Pandas Query
+              <input
+                className="text-input resource-name-input"
+                value={data.condition || ""}
+                onChange={(event) => onChange({ ...data, condition: event.target.value })}
+                placeholder={"status == 'DONE' and amount > 0"}
+              />
             </label>
           )}
-          <p className="muted">{operation === "append" ? "Append requires exactly one input DataFrame." : "Delete accepts one optional input DataFrame and passes it through."}</p>
-        </>
+        </div>
       )}
       </div>
     </div>

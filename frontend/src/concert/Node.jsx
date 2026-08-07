@@ -1,6 +1,7 @@
 import { Handle, Position } from "reactflow";
 import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import DataObjectOutlinedIcon from "@mui/icons-material/DataObjectOutlined";
+import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
 import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import LoginOutlinedIcon from "@mui/icons-material/LoginOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
@@ -34,6 +35,10 @@ export const nodeStyle = {
   python: {
     borderColor: "#16a34a",
     background: "#f0fdf4",
+  },
+  opl: {
+    borderColor: "#0f766e",
+    background: "#f0fdfa",
   },
   dbWrite: {
     borderColor: "#f97316",
@@ -77,6 +82,7 @@ export const statusLabel = {
 export const nodeIcon = {
   dbRead: StorageOutlinedIcon,
   python: PythonIcon,
+  opl: CalculateOutlinedIcon,
   dbWrite: StorageOutlinedIcon,
   concert: AccountTreeOutlinedIcon,
   concertInput: LoginOutlinedIcon,

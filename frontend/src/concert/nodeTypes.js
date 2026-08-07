@@ -5,6 +5,8 @@ export const nodeTypes = {
 
   python: Node,
 
+  opl: Node,
+
   dbWrite: Node,
 
   concert: Node,

@@ -20,7 +20,7 @@ export const folderRows = (directories) => {
   return rows;
 };
 
-export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["concert"], onSelect, selectedKey, onPromote, onRollback, busy }) {
+export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["concert"], onSelect, selectedKey, onPromote, onRollback, onMove, canMove, onDelete, busy }) {
   const [expandedBackups, setExpandedBackups] = useState(() => new Set());
   const visible = concerts.filter((item) => folderOf(item.name) === directory);
   const updatedAt = (value) => value ? new Date(value * 1000).toLocaleString() : "";
@@ -30,6 +30,7 @@ export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["co
     (groups[item.name] ||= []).push(item);
     return groups;
   }, {}));
+  const showActions = Boolean(onPromote || onRollback || onMove || onDelete);
   const row = (item, child = false) => {
     const openable = Boolean(onOpen && openKinds.includes(item.kind));
     const selectable = Boolean(onSelect);
@@ -37,7 +38,7 @@ export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["co
     const name = child ? item.path.split("/").pop().replace(/\.concert$/, "") : item.name.split("/").pop();
     return (
       <div
-        className={`concert-file-row ${openable ? "openable" : ""} ${selectable ? "selectable" : ""} ${selectedKey === itemKey ? "selected-file" : ""} ${child ? "backup-child" : ""}`}
+        className={`concert-file-row ${showActions ? "with-actions" : ""} ${openable ? "openable" : ""} ${selectable ? "selectable" : ""} ${selectedKey === itemKey ? "selected-file" : ""} ${child ? "backup-child" : ""}`}
         key={`${item.kind}-${item.path}`}
         onClick={() => selectable && onSelect(item)}
         onDoubleClick={() => openable && onOpen(item.name, item)}
@@ -46,23 +47,25 @@ export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["co
         <span>{kindLabel[item.kind]}</span>
         <span>{item.version}</span>
         <span>{updatedAt(item.updatedAt)}</span>
-        <span className="concert-file-actions">
+        {showActions && <span className="concert-file-actions">
           {item.kind === "rehearsal" && onPromote && <button className="primary-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onPromote(item); }}>Promote</button>}
           {item.kind === "backup" && onRollback && <button className="danger-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onRollback(item); }}>Rollback</button>}
-        </span>
+          {item.kind === "concert" && onMove && <button disabled={busy || !canMove?.(item)} onClick={(event) => { event.stopPropagation(); onMove(item); }}>Move Folder</button>}
+          {onDelete && <button className="danger-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onDelete(item); }}>Delete</button>}
+        </span>}
       </div>
     );
   };
   return (
     <div className="concert-file-table">
-      <div className="concert-file-row concert-file-header">
-        <span>Name</span><span>Type</span><span>Version</span><span>Updated At</span><span>Action</span>
+      <div className={`concert-file-row concert-file-header ${showActions ? "with-actions" : ""}`}>
+        <span>Name</span><span>Type</span><span>Version</span><span>Updated At</span>{showActions && <span>Action</span>}
       </div>
       {regular.map((item) => row(item))}
       {backupGroups.map(([name, items]) => (
         <div className="concert-backup-group" key={`backup-${name}`}>
           <div
-            className="concert-file-row concert-backup-parent"
+            className={`concert-file-row concert-backup-parent ${showActions ? "with-actions" : ""}`}
             onClick={() => setExpandedBackups((current) => {
               const next = new Set(current);
               if (next.has(name)) next.delete(name); else next.add(name);
@@ -70,7 +73,7 @@ export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["co
             })}
           >
             <span><span className="concert-tree-branch">{expandedBackups.has(name) ? "▾" : "▸"}</span>{name.split("/").pop()}</span>
-            <span>Backup</span><span>{items.length} versions</span><span /><span />
+            <span>Backup</span><span>{items.length} versions</span><span />{showActions && <span />}
           </div>
           {expandedBackups.has(name) && items.map((item) => row(item, true))}
         </div>

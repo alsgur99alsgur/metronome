@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 const safeName = (value) => {
   const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
   if (!safe) return "task";
@@ -12,45 +14,71 @@ const normalizeVariableName = (value) => {
 export default function VariablesDialog({
   globalVariables,
   inputVariables,
-  onChangeGlobal,
-  onChangeInput,
-  onClose,
+  onSave,
+  onCancel,
 }) {
+  const [draftGlobalVariables, setDraftGlobalVariables] = useState(() =>
+    (globalVariables || []).map((item) => ({ ...item })),
+  );
+  const [draftInputVariables, setDraftInputVariables] = useState(() =>
+    (inputVariables || []).map((item) => ({ ...item })),
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
   const updateGlobal = (index, patch) => {
-    onChangeGlobal((current) =>
+    setDraftGlobalVariables((current) =>
       current.map((item, itemIndex) =>
         itemIndex === index ? { ...item, ...patch } : item,
       ),
     );
   };
   const updateInput = (index, patch) => {
-    onChangeInput((current) =>
+    setDraftInputVariables((current) =>
       current.map((item, itemIndex) =>
         itemIndex === index ? { ...item, ...patch } : item,
       ),
     );
   };
 
+  const save = () => {
+    onSave({
+      globalVariables: draftGlobalVariables.map((item) => ({
+        ...item,
+        name: normalizeVariableName(item.name),
+      })),
+      inputVariables: draftInputVariables.map((item) => ({
+        ...item,
+        name: normalizeVariableName(item.name),
+      })),
+    });
+  };
+
   return (
-    <div className="modal-backdrop" role="presentation">
-      <div className="variable-dialog" role="dialog" aria-modal="true">
-        <div className="dialog-header">
+    <div className="editor-modal-backdrop" role="presentation">
+      <aside className="editor-panel variable-editor-panel" role="dialog" aria-modal="true">
+        <div className="editor-header">
           <div>
             <div className="eyebrow">Concert</div>
-            <h3>Variables</h3>
+            <h2>Edit Variables</h2>
           </div>
-          <button className="icon-button" onClick={onClose} title="Close">
-            x
-          </button>
         </div>
 
-        <div className="variable-sections">
+        <div className="editor-body variable-sections">
           <section>
             <div className="variable-section-header">
               <div className="dialog-section-title">Input Variables</div>
               <button
                 onClick={() =>
-                  onChangeInput((current) => [
+                  setDraftInputVariables((current) => [
                     ...current,
                     { name: "$input", defaultValue: "" },
                   ])
@@ -59,7 +87,7 @@ export default function VariablesDialog({
                 Add Input
               </button>
             </div>
-            {(inputVariables || []).map((item, index) => (
+            {draftInputVariables.map((item, index) => (
               <div className="variable-row" key={`input-${index}`}>
                 <input
                   className="text-input"
@@ -84,7 +112,7 @@ export default function VariablesDialog({
                 />
                 <button
                   onClick={() =>
-                    onChangeInput((current) =>
+                    setDraftInputVariables((current) =>
                       current.filter((_, itemIndex) => itemIndex !== index),
                     )
                   }
@@ -100,7 +128,7 @@ export default function VariablesDialog({
               <div className="dialog-section-title">Global Variables</div>
               <button
                 onClick={() =>
-                  onChangeGlobal((current) => [
+                  setDraftGlobalVariables((current) => [
                     ...current,
                     { name: "$var", value: "" },
                   ])
@@ -109,7 +137,7 @@ export default function VariablesDialog({
                 Add Global
               </button>
             </div>
-            {(globalVariables || []).map((item, index) => (
+            {draftGlobalVariables.map((item, index) => (
               <div className="variable-row" key={`global-${index}`}>
                 <input
                   className="text-input"
@@ -134,7 +162,7 @@ export default function VariablesDialog({
                 />
                 <button
                   onClick={() =>
-                    onChangeGlobal((current) =>
+                    setDraftGlobalVariables((current) =>
                       current.filter((_, itemIndex) => itemIndex !== index),
                     )
                   }
@@ -148,11 +176,12 @@ export default function VariablesDialog({
 
         <div className="editor-actions">
           <div className="action-spacer" />
-          <button className="primary-button" onClick={onClose}>
-            Done
+          <button onClick={onCancel}>Cancel</button>
+          <button className="primary-button" onClick={save}>
+            Save
           </button>
         </div>
-      </div>
+      </aside>
     </div>
   );
 }

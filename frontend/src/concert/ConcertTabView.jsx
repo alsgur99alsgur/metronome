@@ -32,6 +32,7 @@ import ConcertSearch from "./ConcertSearch";
 import { openDataWindow } from "./DataViewerWindow";
 import InputEditor from "./InputEditor";
 import OutputEditor from "./OutputEditor";
+import OplEditor, { buildPyomoCode } from "./OplEditor";
 import DbEditor from "./DbEditor";
 import ResourceEditor from "./ResourceEditor";
 import PythonEditor, { pythonTemplate } from "./PythonEditor";
@@ -46,6 +47,17 @@ import { nodeTypes } from "./nodeTypes";
 const makeId = () => crypto.randomUUID();
 let lastNodeIdBase = "";
 let lastNodeIdCount = 0;
+
+const responseErrorMessage = async (response) => {
+  const text = await response.text();
+  if (!text) return `Request failed (${response.status}).`;
+  try {
+    const body = JSON.parse(text);
+    return typeof body?.detail === "string" ? body.detail : text;
+  } catch {
+    return text;
+  }
+};
 
 const padNumber = (value, size) => String(value).padStart(size, "0");
 
@@ -243,6 +255,21 @@ const hasOutputTextSelection = () => {
   );
 };
 
+const hasPyomoCodeTextSelection = () => {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed) return false;
+  const isInsideCode = (node) => {
+    const element =
+      node instanceof HTMLElement
+        ? node
+        : node?.parentElement instanceof HTMLElement
+          ? node.parentElement
+          : null;
+    return Boolean(element?.closest(".opl-code-dialog pre"));
+  };
+  return isInsideCode(selection.anchorNode) || isInsideCode(selection.focusNode);
+};
+
 const getEditableSnapshot = (type, data = {}) => {
   if (type === "dbRead") {
     return {
@@ -255,6 +282,19 @@ const getEditableSnapshot = (type, data = {}) => {
     return {
       name: data.name || "",
       code: data.code || "",
+    };
+  }
+  if (type === "opl") {
+    return {
+      name: data.name || "",
+      sets: data.sets || [],
+      params: data.params || [],
+      variables: data.variables || [],
+      expressions: data.expressions || [],
+      objectiveSense: data.objectiveSense || "maximize",
+      solver: data.solver || "highs",
+      solverTimeoutSeconds: data.solverTimeoutSeconds ?? 60,
+      mipGap: data.mipGap ?? 0.01,
     };
   }
   if (type === "dbWrite") {
@@ -325,7 +365,7 @@ const edgeTypes = {
   center: CenterEdge,
 };
 
-const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write" })[type] || type;
+const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write", opl: "OPL" })[type] || type;
 
 const paletteGroups = [
   [
@@ -340,14 +380,15 @@ const paletteGroups = [
     { type: "fileWrite", label: "File Write" },
   ],
   [
-    { type: "concert", label: "Concert Call" },
-    { type: "concertInput", label: "Input DF" },
-    { type: "concertOutput", label: "Output DF" },
+    { type: "concert", label: "Con Call" },
+    { type: "concertInput", label: "Input" },
+    { type: "concertOutput", label: "Output" },
   ],
   [
     { type: "loopIn", label: "Loop In" },
     { type: "loopOut", label: "Loop Out" },
   ],
+  [{ type: "opl", label: "OPL" }],
 ];
 
 const createNode = (type, index, position) => {
@@ -368,6 +409,17 @@ const createNode = (type, index, position) => {
 
   if (type === "python") {
     data.code = pythonTemplate(name);
+  }
+
+  if (type === "opl") {
+    data.sets = [];
+    data.params = [];
+    data.variables = [];
+    data.expressions = [];
+    data.objectiveSense = "maximize";
+    data.solver = "highs";
+    data.solverTimeoutSeconds = 60;
+    data.mipGap = 0.01;
   }
 
   if (type === "dbWrite") {
@@ -578,12 +630,15 @@ const hasConcertNodeChange = (changes) =>
 const hasConcertEdgeChange = (changes) =>
   changes.some((change) => change.type !== "select");
 
-function ContextMenu({ menu, onViewData, onOpenConcert }) {
+function ContextMenu({ menu, onViewData, onViewLp, onOpenConcert, canViewLp }) {
   if (!menu) return null;
 
   return (
     <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
       <button onClick={() => onViewData(menu.node)}>View Data</button>
+      {menu.node.type === "opl" && canViewLp && (
+        <button onClick={() => onViewLp(menu.node)}>View LP</button>
+      )}
       {menu.node.type === "concert" && menu.node.data?.concertName && (
         <button onClick={() => onOpenConcert(menu.node)}>Open Concert</button>
       )}
@@ -1018,15 +1073,32 @@ function EditorPanel({
   outputMessage,
   loopIterationMode,
   apiBaseUrl,
+  globalVariables,
+  inputVariables,
   onSave,
   onClose,
 }) {
+  const [isPyomoCodeOpen, setIsPyomoCodeOpen] = useState(false);
+  const [pyomoCopyToast, setPyomoCopyToast] = useState("");
+  const pyomoCopyToastTimerRef = useRef(null);
+
+  useEffect(() => {
+    setIsPyomoCodeOpen(false);
+    setPyomoCopyToast("");
+  }, [selectedNode?.id]);
+
   if (!selectedNode || !editData) return null;
 
   return (
     <div
       className="editor-modal-backdrop"
-      onKeyDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && isPyomoCodeOpen) {
+          event.preventDefault();
+          setIsPyomoCodeOpen(false);
+        }
+        event.stopPropagation();
+      }}
     >
       <aside className="editor-panel">
         <div className="editor-header">
@@ -1034,9 +1106,6 @@ function EditorPanel({
             <div className="eyebrow">{nodeTypeLabel(selectedNode.type)}</div>
             <h2>Edit Node</h2>
           </div>
-          <button className="icon-button" onClick={onClose} title="Close">
-            x
-          </button>
         </div>
 
         <label className="field-label">Name</label>
@@ -1071,6 +1140,8 @@ function EditorPanel({
               outputColumns={outputColumns}
               outputMessage={outputMessage}
               apiBaseUrl={apiBaseUrl}
+              globalVariables={globalVariables}
+              inputVariables={inputVariables}
             />
           )}
           {selectedNode.type === "python" && (
@@ -1083,6 +1154,13 @@ function EditorPanel({
               outputMessage={outputMessage}
             />
           )}
+          {selectedNode.type === "opl" && (
+            <OplEditor
+              editData={editData}
+              setEditData={setEditData}
+              inputDataframes={inputDataframes}
+            />
+          )}
           {selectedNode.type === "dbWrite" && (
             <DbEditor
               editData={editData}
@@ -1093,6 +1171,8 @@ function EditorPanel({
               outputMessage={outputMessage}
               describeEnabled={false}
               apiBaseUrl={apiBaseUrl}
+              globalVariables={globalVariables}
+              inputVariables={inputVariables}
             />
           )}
           {selectedNode.type === "concert" && (
@@ -1142,6 +1222,11 @@ function EditorPanel({
         </div>
 
         <div className="editor-actions">
+          {selectedNode.type === "opl" && (
+            <button type="button" onClick={() => { setPyomoCopyToast(""); setIsPyomoCodeOpen(true); }}>
+              View Pyomo Code
+            </button>
+          )}
           <div className="action-spacer" />
           <button onClick={onClose}>Cancel</button>
           <button className="primary-button" onClick={onSave}>
@@ -1149,6 +1234,36 @@ function EditorPanel({
           </button>
         </div>
       </aside>
+      {selectedNode.type === "opl" && isPyomoCodeOpen && (
+        <div className="opl-code-backdrop" onClick={() => setIsPyomoCodeOpen(false)}>
+          <section className="opl-code-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="opl-code-dialog-header">
+              <div>
+                <div className="eyebrow">Generated Preview</div>
+                <h3>Pyomo Code</h3>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setIsPyomoCodeOpen(false)}>×</button>
+            </div>
+            <pre>{buildPyomoCode(editData)}</pre>
+            <div className="editor-actions">
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(buildPyomoCode(editData));
+                  setPyomoCopyToast("복사 완료");
+                  window.clearTimeout(pyomoCopyToastTimerRef.current);
+                  pyomoCopyToastTimerRef.current = window.setTimeout(() => setPyomoCopyToast(""), 1600);
+                }}
+              >
+                Copy Code
+              </button>
+              <div className="action-spacer" />
+              <button type="button" onClick={() => setIsPyomoCodeOpen(false)}>Close</button>
+            </div>
+            {pyomoCopyToast && <div className="opl-copy-toast" role="status">{pyomoCopyToast}</div>}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -1245,6 +1360,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const [editData, setEditData] = useState(null);
   const [run, setRun] = useState(null);
   const [activeRunId, setActiveRunId] = useState(null);
+  const [isRunErrorDismissed, setIsRunErrorDismissed] = useState(false);
   const [openingConcertName, setOpeningConcertName] = useState("");
   const [lastRunId, setLastRunId] = useState(null);
   const [runCompleteTiming, setRunCompleteTiming] = useState(null);
@@ -1273,16 +1389,36 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
   const [isReplayDialogOpen, setIsReplayDialogOpen] = useState(false);
   const openInputRef = useRef(null);
+  const subMenuRef = useRef(null);
   const reactFlowRef = useRef(null);
   const replayRequestRef = useRef(0);
   const graphRef = useRef({ nodes: initialNodes, edges: initialEdges });
   const viewportRef = useRef({ x: 0, y: 0, zoom: 1 });
   const canvasRef = useRef(null);
+  const isCanvasFocusedRef = useRef(false);
   const graphClipboardRef = useRef(null);
   const selectedNodeIdsRef = useRef([]);
   const selectedEdgeIdsRef = useRef([]);
   const pointerPositionRef = useRef(null);
   const bottomPanelDragRef = useRef(null);
+
+  useEffect(() => {
+    if (run?.status === "error") setIsRunErrorDismissed(false);
+  }, [run?.error, run?.status]);
+
+  useEffect(() => {
+    const closeSubMenuOutside = (event) => {
+      const menuRoot = event.target.closest?.(".menu-root");
+      if (!menuRoot || !subMenuRef.current?.contains(menuRoot)) {
+        setActiveSubMenu(null);
+      }
+    };
+    document.addEventListener("pointerdown", closeSubMenuOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeSubMenuOutside, true);
+    };
+  }, []);
+
   const suppressNextEdgeHistoryRef = useRef(false);
   const nodeMoveHistoryRef = useRef(null);
   const viewNodeDataRef = useRef(null);
@@ -2251,28 +2387,45 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     if (!activeRunId) return undefined;
 
     const poll = async () => {
-      const response = await fetch(`${apiBaseUrl}/runs/${activeRunId}`);
-      if (!response.ok) return;
-      const nextRun = await response.json();
-      setRun((currentRun) => ({
-        ...nextRun,
-        nodes: Object.fromEntries(
-          Object.entries(nextRun.nodes || {}).map(([nodeId, nodeRun]) => [
-            nodeId,
-            {
-              ...nodeRun,
-              result: nodeRun.result || currentRun?.nodes?.[nodeId]?.result,
-            },
-          ]),
-        ),
-      }));
-      applyRunStateToNodes(nextRun);
-      if (["success", "error", "canceled"].includes(nextRun.status)) {
+      try {
+        const response = await fetch(`${apiBaseUrl}/runs/${activeRunId}`);
+        if (!response.ok) throw new Error(await responseErrorMessage(response));
+        const responseRun = await response.json();
+        const failedNodeError = Object.values(responseRun.nodes || {}).find(
+          (nodeRun) => nodeRun?.status === "error" && nodeRun?.error,
+        )?.error;
+        const backendError = responseRun.error || failedNodeError;
+        const nextRun = responseRun.status === "error"
+          ? { ...responseRun, error: backendError || "The backend reported that the run failed." }
+          : responseRun;
+        setRun((currentRun) => ({
+          ...nextRun,
+          nodes: Object.fromEntries(
+            Object.entries(nextRun.nodes || {}).map(([nodeId, nodeRun]) => [
+              nodeId,
+              {
+                ...nodeRun,
+                result: nodeRun.result || currentRun?.nodes?.[nodeId]?.result,
+              },
+            ]),
+          ),
+        }));
+        applyRunStateToNodes(nextRun);
+        if (!["success", "error", "canceled"].includes(nextRun.status)) return;
         setActiveRunId(null);
+        if (nextRun.status === "error") setIsRunErrorDismissed(false);
         if (nextRun.status === "success") {
           setRunCompleteTiming(nextRun.timing || {});
         }
         loadReplays();
+      } catch (error) {
+        const message = `Run status check failed: ${error.message}`;
+        setRun((currentRun) => ({ ...currentRun, status: "error", error: message }));
+        setNodes((currentNodes) => currentNodes.map((node) => node.data.status === "pending" || node.data.status === "running"
+          ? { ...node, data: { ...node.data, status: "error" } }
+          : node));
+        setIsRunErrorDismissed(false);
+        setActiveRunId(null);
       }
     };
 
@@ -2280,6 +2433,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const interval = window.setInterval(poll, 800);
     return () => window.clearInterval(interval);
   }, [activeRunId, apiBaseUrl, applyRunStateToNodes, loadReplays]);
+
+  useEffect(() => {
+    const trackCanvasFocus = (event) => {
+      isCanvasFocusedRef.current = Boolean(
+        canvasRef.current?.contains(event.target),
+      );
+    };
+    document.addEventListener("pointerdown", trackCanvasFocus, true);
+    return () => document.removeEventListener("pointerdown", trackCanvasFocus, true);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -2319,6 +2482,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         return;
       }
 
+      if (isSelectAllShortcut && editData) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (isSaveShortcut) {
         event.preventDefault();
         event.stopPropagation();
@@ -2348,7 +2517,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       }
 
       if (isCopyShortcut) {
-        if (hasOutputTextSelection()) {
+        if (!isCanvasFocusedRef.current) {
+          return;
+        }
+        if (hasOutputTextSelection() || hasPyomoCodeTextSelection()) {
           return;
         }
         if (copySelectedGraph()) {
@@ -2402,6 +2574,21 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       }
 
       if (event.key === "Escape") {
+        if (document.querySelector(".deploy-dialog")) {
+          return;
+        }
+        if (document.querySelector(".concert-manager")) {
+          return;
+        }
+        if (document.querySelector(".stage-resources-dialog")) {
+          return;
+        }
+        if (document.querySelector(".variable-editor-panel")) {
+          return;
+        }
+        if (document.querySelector(".opl-code-dialog")) {
+          return;
+        }
         if (isMonacoSuggestVisible()) {
           return;
         }
@@ -2878,7 +3065,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setSelectedNode(selectedTarget);
     setSearchHighlight(null);
 
-    if (["dbRead", "python", "dbWrite", "concert", "concertInput", "cacheRead", "cacheWrite", "fileRead", "fileWrite", "loopIn", "loopOut"].includes(target.type)) {
+    if (["dbRead", "python", "opl", "dbWrite", "concert", "concertInput", "cacheRead", "cacheWrite", "fileRead", "fileWrite", "loopIn", "loopOut"].includes(target.type)) {
       setEditData(editableNodeData(target));
     } else {
       setEditData(null);
@@ -3028,12 +3215,15 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const viewNodeData = useCallback(
     async (node) => {
       const existingNodeRun = run?.nodes?.[node.id];
+      const runId = lastRunId || run?.id;
+      const dataUrl = runId
+        ? `${apiBaseUrl}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node.id)}/data`
+        : "";
       if (existingNodeRun?.result) {
-        openDataWindow(node, existingNodeRun);
+        openDataWindow(node, existingNodeRun, null, { dataUrl });
         return;
       }
 
-      const runId = lastRunId || run?.id;
       if (!runId) {
         openDataWindow(node, existingNodeRun);
         return;
@@ -3056,7 +3246,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           result: body.result,
         };
         mergeNodeResult(node.id, nextNodeRun);
-        openDataWindow(node, nextNodeRun);
+        openDataWindow(node, nextNodeRun, null, { dataUrl });
       } catch (error) {
         openDataWindow(node, {
           ...(existingNodeRun || {}),
@@ -3067,6 +3257,49 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     [apiBaseUrl, lastRunId, mergeNodeResult, run],
   );
   viewNodeDataRef.current = viewNodeData;
+
+  const viewOplLp = useCallback(
+    async (node) => {
+      const viewer = window.open("", "_blank", "width=1100,height=760,resizable=yes,scrollbars=yes");
+      if (!viewer) return;
+      viewer.document.title = `${node.data?.name || node.id} - LP Model`;
+      viewer.document.body.replaceChildren();
+      viewer.document.body.style.margin = "0";
+      viewer.document.body.style.background = "#0f172a";
+      const pre = viewer.document.createElement("pre");
+      pre.style.margin = "0";
+      pre.style.minHeight = "100vh";
+      pre.style.boxSizing = "border-box";
+      pre.style.color = "#e2e8f0";
+      pre.style.font = "13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      pre.style.padding = "18px";
+      pre.style.whiteSpace = "pre";
+      pre.style.userSelect = "text";
+      pre.textContent = "Loading LP model...";
+      viewer.document.body.appendChild(pre);
+
+      const nodeRunStatus = run?.nodes?.[node.id]?.status;
+      const hasCurrentCache = Boolean(
+        lastRunId && ["success", "skipped"].includes(nodeRunStatus),
+      );
+      const query = new URLSearchParams({
+        concertName: currentReplayConcertName,
+        nodeId: node.id,
+        format: "lp",
+      });
+      if (hasCurrentCache) query.set("cacheId", lastRunId);
+      if (selectedReplayId) query.set("replayId", selectedReplayId);
+      try {
+        const response = await fetch(`${apiBaseUrl}/opl/model?${query.toString()}`);
+        if (!response.ok) throw new Error(await response.text());
+        pre.textContent = await response.text();
+      } catch (error) {
+        pre.textContent = `Load LP failed: ${error.message}`;
+        pre.style.color = "#fecaca";
+      }
+    },
+    [apiBaseUrl, currentReplayConcertName, lastRunId, run, selectedReplayId],
+  );
 
   const openReplayCache = useCallback(
     async (replay) => {
@@ -3187,7 +3420,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
     const runConcertName = safeConcertPathName(concertName) || safeName(concertName);
     try {
-      await validateCalledConcerts(nodes);
+      if (mode !== "selected") {
+        await validateCalledConcerts(nodes);
+      }
     } catch (error) {
       if (error?.name === "AbortError") return;
       setRun({
@@ -3213,6 +3448,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setEdges(nextEdges);
     setRun(null);
     setActiveRunId(null);
+    setIsRunErrorDismissed(false);
     setRunCompleteTiming(null);
 
     const replayPoint = visibleReplays.find(
@@ -3221,38 +3457,46 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const inputParams =
       runParams || (replay ? replayPoint?.params || {} : runParamValues);
 
-    const response = await fetch(`${apiBaseUrl}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        concertName: runConcertName,
-        concertId,
-        nodes: nextNodes,
-        edges: nextEdges,
-        globalVariables: variablePayload(globalVariables),
-        inputVariables: variablePayload(inputVariables, "defaultValue"),
-        params: Object.fromEntries(
-          Object.entries(inputParams || {}).map(([key, value]) => [
-            key,
-            parseVariableValue(value),
-          ]),
-        ),
-        mode,
-        selected: selectedNode?.id,
-        replay,
-        replayId: replay ? selectedReplayId : null,
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text();
-      setRun({ status: "error", nodes: {}, error: detail });
-      return;
+    try {
+      const response = await fetch(`${apiBaseUrl}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          concertName: runConcertName,
+          concertId,
+          nodes: nextNodes,
+          edges: nextEdges,
+          globalVariables: variablePayload(globalVariables),
+          inputVariables: variablePayload(inputVariables, "defaultValue"),
+          params: Object.fromEntries(
+            Object.entries(inputParams || {}).map(([key, value]) => [
+              key,
+              parseVariableValue(value),
+            ]),
+          ),
+          mode,
+          selected: selectedNode?.id,
+          replay,
+          replayId: replay ? selectedReplayId : null,
+        }),
+      });
+      if (!response.ok) throw new Error(await responseErrorMessage(response));
+      const body = await response.json();
+      setLastRunId(body.runId);
+      setActiveRunId(body.runId);
+    } catch (error) {
+      const message = `Run failed: ${error.message}`;
+      const failedNodes = Object.fromEntries(nextNodes.map((node) => [
+        node.id,
+        { id: node.id, name: node.data.label || node.data.name || node.id, status: "error", error: message },
+      ]));
+      setNodes((currentNodes) => currentNodes.map((node) => ({
+        ...node,
+        data: { ...node.data, status: "error" },
+      })));
+      setRun({ status: "error", nodes: failedNodes, error: message });
+      setIsRunErrorDismissed(false);
     }
-
-    const body = await response.json();
-    setLastRunId(body.runId);
-    setActiveRunId(body.runId);
   };
 
   const cancelRun = async () => {
@@ -3379,7 +3623,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
         {isTabOpen ? (
           <>
-            <div className="sub-toolbar">
+            <div ref={subMenuRef} className="sub-toolbar">
               <div
                 className="menu-root"
                 onClick={(event) => event.stopPropagation()}
@@ -3660,6 +3904,15 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           setContextMenu(null);
           void openServerConcert(node.data.concertName, node.data.concertId).catch((error) => window.alert(error.message));
         }}
+        canViewLp={Boolean(
+          contextMenu?.node?.type === "opl" &&
+          (selectedReplayId ||
+            (lastRunId && ["success", "skipped"].includes(run?.nodes?.[contextMenu.node.id]?.status)))
+        )}
+        onViewLp={(node) => {
+          setContextMenu(null);
+          void viewOplLp(node);
+        }}
       />
 
       <EditorPanel
@@ -3674,6 +3927,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         outputMessage={selectedOutputMessage}
         loopIterationMode={selectedLoopIterationMode}
         apiBaseUrl={apiBaseUrl}
+        globalVariables={globalVariables}
+        inputVariables={inputVariables}
         onSave={saveEditor}
         onClose={closeEditor}
       />
@@ -3698,17 +3953,21 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         <VariablesDialog
           globalVariables={globalVariables}
           inputVariables={inputVariables}
-          onChangeGlobal={(updater) => {
-            pushHistory("Change global variables");
-            setIsDirty(true);
-            setGlobalVariables(updater);
+          onSave={({ globalVariables: nextGlobal, inputVariables: nextInput }) => {
+            const changed =
+              JSON.stringify(nextGlobal) !== JSON.stringify(globalVariables) ||
+              JSON.stringify(nextInput) !== JSON.stringify(inputVariables);
+            if (changed) {
+              pushHistory("Change variables");
+              setIsDirty(true);
+              setGlobalVariables(nextGlobal);
+              setInputVariables(nextInput);
+            }
+            setIsVariablesDialogOpen(false);
           }}
-          onChangeInput={(updater) => {
-            pushHistory("Change input variables");
-            setIsDirty(true);
-            setInputVariables(updater);
+          onCancel={() => {
+            setIsVariablesDialogOpen(false);
           }}
-          onClose={() => setIsVariablesDialogOpen(false)}
         />
       )}
 
@@ -3723,6 +3982,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       )}
 
       {activeRunId && <RunningDialog run={run} onCancel={cancelRun} />}
+      {run?.status === "error" && !activeRunId && !isRunErrorDismissed && (
+        <RunningDialog run={run} onClose={() => setIsRunErrorDismissed(true)} />
+      )}
       {openingConcertName && <RunningDialog title="Opening" message={`${openingConcertName} is opening.`} />}
 
       {runCompleteTiming && (

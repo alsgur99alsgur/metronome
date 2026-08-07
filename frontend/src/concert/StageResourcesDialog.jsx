@@ -25,6 +25,25 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleteName, setDeleteName] = useState("");
   const [notice, setNotice] = useState("");
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (pendingDelete) {
+        setPendingDelete(null);
+        setDeleteName("");
+        return;
+      }
+      if (notice) {
+        setNotice("");
+        return;
+      }
+      onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [notice, onClose, pendingDelete]);
+
   const load = useCallback(async () => {
     const response = await fetch(`${apiBaseUrl}/stage-resources`);
     if (!response.ok) throw new Error(await response.text());
@@ -67,7 +86,7 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <section className="variable-dialog stage-resources-dialog" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Resources</h2></div><button onClick={onClose}>Close</button></div>
+        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Resources</h2></div></div>
         <div className="stage-resource-create">
           <select value={kind} onChange={(event) => setKind(event.target.value)}><option value="cache">Cache</option><option value="file">File</option></select>
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="resource_name" />

@@ -11,15 +11,26 @@ from uuid import uuid4
 from concert_store import ConcertStore
 
 
-class VersionMismatchError(ValueError):
-    def __init__(self, name, current_version, next_version):
+class DeploymentMismatchError(ValueError):
+    def __init__(self, message, mismatch_type, **details):
         self.detail = {
-            "code": "VERSION_MISMATCH",
-            "name": name,
-            "currentVersion": current_version,
-            "nextVersion": next_version,
+            "code": "DEPLOYMENT_MISMATCH",
+            "mismatchType": mismatch_type,
+            "message": message,
+            **details,
         }
-        super().__init__(f"Production version mismatch: {current_version} -> {next_version}")
+        super().__init__(message)
+
+
+class VersionMismatchError(DeploymentMismatchError):
+    def __init__(self, name, current_version, next_version):
+        super().__init__(
+            f"Production version mismatch: {current_version} -> {next_version}",
+            "version",
+            name=name,
+            currentVersion=current_version,
+            nextVersion=next_version,
+        )
 
 
 class DeploymentStore:
@@ -129,9 +140,11 @@ class DeploymentStore:
                 os.unlink(temporary)
 
     def _rename_payload(self, path, name):
+        stat = os.stat(path)
         payload = self._read(path)
         payload["name"] = os.path.basename(name)
         self._write(path, self._payload_bytes(payload))
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
 
     @staticmethod
     def _prune_empty(root, path):
@@ -193,7 +206,7 @@ class DeploymentStore:
                     concert_ids.add(ConcertStore.validate_id(self._read(os.path.join(current_root, file_name)).get("concertId")))
         return concert_ids
 
-    def prepare(self, transaction_id, payload, source_name=None, deployment_name=None, allow_version_mismatch=False):
+    def prepare(self, transaction_id, payload, source_name=None, deployment_name=None, allow_mismatch=False):
         transaction_id = str(transaction_id or "")
         if not re.fullmatch(r"[A-Za-z0-9-]+", transaction_id):
             raise ValueError("Invalid deployment transaction ID.")
@@ -209,9 +222,14 @@ class DeploymentStore:
                 raise ValueError(f"Existing Production must be deployed to its current directory: {production_name}")
             current_version = self._version(self._concert_path(self.concerts_root, production_name))
             current_id = self._read(self._concert_path(self.concerts_root, production_name))["concertId"]
-            if current_id != payload["concertId"]:
-                raise ValueError(f"Production concertId mismatch: {current_id}")
-            if current_version != payload["version"] and not allow_version_mismatch:
+            if current_id != payload["concertId"] and not allow_mismatch:
+                raise DeploymentMismatchError(
+                    f"Production concertId mismatch: {current_id}",
+                    "productionConcertId",
+                    currentConcertId=current_id,
+                    nextConcertId=payload["concertId"],
+                )
+            if current_version != payload["version"] and not allow_mismatch:
                 raise VersionMismatchError(production_name, current_version, payload["version"])
             source_name = production_name
         else:
@@ -222,8 +240,14 @@ class DeploymentStore:
             if owner:
                 raise ValueError(f"concertId already belongs to another Concert: {owner}")
             backup_ids = self._backup_ids_with_basename(os.path.basename(name))
-            if backup_ids and backup_ids != {payload["concertId"]}:
-                raise ValueError(f"Backup concertId mismatch: {', '.join(sorted(backup_ids))}")
+            if backup_ids and backup_ids != {payload["concertId"]} and not allow_mismatch:
+                backup_id_text = ", ".join(sorted(backup_ids))
+                raise DeploymentMismatchError(
+                    f"Backup concertId mismatch: {backup_id_text}",
+                    "backupConcertId",
+                    backupConcertIds=sorted(backup_ids),
+                    nextConcertId=payload["concertId"],
+                )
         target = self._concert_path(self.rehearsals_root, name)
         rehearsal_key = f"rehearsal:{os.path.basename(name)}"
         with self._lock_names(source_name, name, rehearsal_key):
@@ -306,14 +330,14 @@ class DeploymentStore:
         self._sync_directories()
         return {"finalized": True, "transactionId": transaction_id}
 
-    def deploy(self, payload, source_name=None, deployment_name=None, allow_version_mismatch=False):
+    def deploy(self, payload, source_name=None, deployment_name=None, allow_mismatch=False):
         transaction_id = str(uuid4())
         self.prepare(
             transaction_id,
             payload,
             source_name=source_name,
             deployment_name=deployment_name,
-            allow_version_mismatch=allow_version_mismatch,
+            allow_mismatch=allow_mismatch,
         )
         try:
             result = self.commit(transaction_id)
@@ -351,6 +375,7 @@ class DeploymentStore:
             try:
                 os.makedirs(os.path.dirname(production), exist_ok=True)
                 os.replace(rehearsal, production)
+                os.utime(production, None)
             except Exception:
                 if backup and os.path.exists(backup):
                     os.replace(backup, production)
@@ -376,9 +401,11 @@ class DeploymentStore:
                 current_backup = self._backup_path(name, self._version(production))
                 os.makedirs(os.path.dirname(current_backup), exist_ok=True)
                 os.replace(production, current_backup)
+                os.utime(current_backup, None)
             try:
                 os.makedirs(os.path.dirname(production), exist_ok=True)
                 os.replace(backup, production)
+                os.utime(production, None)
             except Exception:
                 if current_backup and os.path.exists(current_backup):
                     os.replace(current_backup, production)
@@ -488,6 +515,9 @@ class DeploymentStore:
                         "name": "/".join(part for part in (folder, original) if part),
                         "backupPath": relative,
                         "backupVersion": version,
+                        "updatedAt": datetime.strptime(
+                            time_key, "%Y%m%d%H%M%S%f"
+                        ).timestamp(),
                         "timeKey": time_key,
                     })
                 else:
@@ -519,6 +549,24 @@ class DeploymentStore:
         for root in (self.concerts_root, self.rehearsals_root, self.backups_root):
             os.makedirs(self._path(root, directory), exist_ok=True)
         return {"directory": directory}
+
+    def delete_directory(self, directory):
+        directory = self.validate_directory(directory)
+        if not directory:
+            raise ValueError("Root Concert directory cannot be deleted.")
+        paths = [self._path(root, directory) for root in (
+            self.concerts_root,
+            self.rehearsals_root,
+            self.backups_root,
+        )]
+        if not os.path.isdir(paths[0]):
+            raise FileNotFoundError(f"Concert directory not found: {directory}")
+        if any(os.path.isdir(path) and os.listdir(path) for path in paths):
+            raise ValueError(f"Concert directory is not empty: {directory}")
+        for path in paths:
+            if os.path.isdir(path):
+                os.rmdir(path)
+        return {"deleted": True, "directory": directory}
 
     def list(self):
         self._sync_directories()

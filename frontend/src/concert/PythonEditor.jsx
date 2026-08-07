@@ -573,7 +573,7 @@ export default function PythonEditor({
                 setEditorReady((current) => current + 1);
               }}
               options={{
-                fontSize: 14,
+                fontSize: 12,
                 minimap: { enabled: false },
                 automaticLayout: true,
                 tabSize: 4,

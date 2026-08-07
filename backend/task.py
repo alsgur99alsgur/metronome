@@ -21,6 +21,7 @@ class Task:
         self.loop_params = {}
         self.loop_iterations = None
         self.loop_dependency_parent_ids = set()
+        self.model_artifact_dirs = []
 
     def __rshift__(self, other):
         self.children.append(other)

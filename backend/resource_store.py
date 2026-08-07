@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -10,6 +11,7 @@ import pandas as pd
 class ResourceStore:
     KINDS = {"cache", "file"}
     SCOPES = {"stage", "concert"}
+    STAGE_CACHE_MANIFEST = "cache_resources.json"
 
     def __init__(self, stage_root, tmp_root):
         self.stage_root = os.path.abspath(stage_root)
@@ -19,6 +21,48 @@ class ResourceStore:
         self._guard = Lock()
         self._locks = {}
         self._cache = {}
+        self._load_stage_cache_names()
+
+    def _stage_cache_manifest_path(self):
+        return os.path.join(self.stage_root, self.STAGE_CACHE_MANIFEST)
+
+    def _load_stage_cache_names(self):
+        path = self._stage_cache_manifest_path()
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+        if not isinstance(payload, dict) or not isinstance(payload.get("caches"), list):
+            raise ValueError(f"{self.STAGE_CACHE_MANIFEST} must contain a 'caches' list.")
+        names = payload["caches"]
+        if any(not isinstance(name, str) for name in names):
+            raise ValueError(f"{self.STAGE_CACHE_MANIFEST} cache names must be strings.")
+        validated = [self.validate_name(name) for name in names]
+        if len(validated) != len(set(validated)):
+            raise ValueError(f"{self.STAGE_CACHE_MANIFEST} contains duplicate cache names.")
+        for name in validated:
+            self._cache[("cache", "stage", name, None)] = pd.DataFrame()
+
+    def _save_stage_cache_names_unlocked(self):
+        path = self._stage_cache_manifest_path()
+        names = sorted(
+            key[2]
+            for key in self._cache
+            if key[0] == "cache" and key[1] == "stage"
+        )
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{self.STAGE_CACHE_MANIFEST}.",
+            suffix=".tmp",
+            dir=self.stage_root,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump({"caches": names}, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     @staticmethod
     def validate_name(name):
@@ -125,7 +169,16 @@ class ResourceStore:
         with self._lock_for(key):
             if self._exists_unlocked(key):
                 raise FileExistsError(f"Stage {kind.title()} already exists: {key[2]}")
-            self._write_unlocked(key, pd.DataFrame())
+            if kind == "cache":
+                with self._guard:
+                    self._cache[key] = pd.DataFrame()
+                    try:
+                        self._save_stage_cache_names_unlocked()
+                    except Exception:
+                        self._cache.pop(key, None)
+                        raise
+            else:
+                self._write_unlocked(key, pd.DataFrame())
         return {"kind": kind, "name": key[2]}
 
     def delete_stage(self, kind, name):
@@ -134,7 +187,13 @@ class ResourceStore:
             if not self._exists_unlocked(key):
                 raise FileNotFoundError(f"Stage {kind.title()} not found: {key[2]}")
             if kind == "cache":
-                self._cache.pop(key, None)
+                with self._guard:
+                    previous = self._cache.pop(key)
+                    try:
+                        self._save_stage_cache_names_unlocked()
+                    except Exception:
+                        self._cache[key] = previous
+                        raise
             else:
                 os.unlink(self._file_path("stage", key[2]))
         with self._guard:
@@ -163,7 +222,7 @@ class ResourceStore:
             self._write_unlocked(key, result)
             return result.copy(deep=True)
 
-    def delete_rows(self, kind, scope, name, condition, run_id=None):
+    def delete_rows(self, kind, scope, name, condition, variables=None, run_id=None):
         condition = str(condition or "").strip()
         if not condition:
             raise ValueError("Delete condition is required.")
@@ -171,7 +230,7 @@ class ResourceStore:
         with self._lock_for(key):
             current = self._read_unlocked(key)
             try:
-                matched = current.query(condition)
+                matched = current.query(condition, local_dict=variables or {})
             except Exception as exc:
                 raise ValueError(f"Invalid pandas query condition: {exc}") from exc
             result = current.drop(index=matched.index).reset_index(drop=True)

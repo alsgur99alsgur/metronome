@@ -81,6 +81,31 @@ class ReplayDataStore:
         return pd.read_parquet(path)
 
     @classmethod
+    def load_model_artifact(
+        cls,
+        base_path,
+        concert_name,
+        replay_id,
+        node_id,
+        file_format="lp",
+    ):
+        if file_format not in {"lp", "mps"}:
+            raise ValueError(f"Unsupported model format: {file_format}")
+        safe_concert = cls._safe_name(concert_name)
+        safe_replay = cls._safe_replay_id(replay_id)
+        safe_node = cls._safe_name(node_id)
+        path = os.path.join(
+            base_path,
+            safe_concert,
+            safe_replay,
+            f"{safe_node}.{file_format}",
+        )
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Model artifact not found for node: {node_id}")
+        with open(path, "r", encoding="utf-8", errors="replace") as file:
+            return file.read()
+
+    @classmethod
     def list_replays(cls, base_path="./replay", concert_name=None, cache_lookup=None):
         if not os.path.isdir(base_path):
             return []
