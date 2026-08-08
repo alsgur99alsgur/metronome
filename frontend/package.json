@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "build:win": "npm run build && electron-builder --win nsis",
+    "build:win": "npm run build && electron-builder --win zip",
     "pack:win": "npm run build && electron-builder --win --dir"
   },
   "dependencies": {
@@ -46,6 +46,7 @@
     "directories": {
       "output": "release"
     },
+    "afterPack": "electron/after-pack.cjs",
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -55,18 +56,18 @@
       {
         "from": "../backend/dist/metronome-backend.exe",
         "to": "backend/metronome-backend.exe"
+      },
+      {
+        "from": "../admin-frontend/dist",
+        "to": "admin-dist"
       }
     ],
     "win": {
+      "executableName": "metronome",
+      "artifactName": "Metronome-${version}-win-${arch}.${ext}",
       "target": [
-        "nsis"
+        "zip"
       ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "deleteAppDataOnUninstall": false
     }
   }
 }

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
-const ADMIN_API_BASE_URL = "http://localhost:8000";
+const queryLocalPort = Number(
+  new URLSearchParams(window.location.search).get("localPort"),
+);
+const localServerPort =
+  Number.isInteger(queryLocalPort) && queryLocalPort >= 1 && queryLocalPort <= 65535
+    ? queryLocalPort
+    : 8000;
+const ADMIN_API_BASE_URL = `http://localhost:${localServerPort}`;
 
 const responseError = async (response) => {
   const body = await response.json().catch(() => null);

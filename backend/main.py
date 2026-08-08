@@ -560,7 +560,7 @@ def list_servers():
     servers = server_manager.list()
     return {
         "servers": servers,
-        "defaultServerName": servers[0]["name"],
+        "defaultServerName": server_manager.primary["name"],
     }
 
 

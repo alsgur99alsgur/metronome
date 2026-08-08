@@ -1634,6 +1634,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (!nextTabs.length) {
         setActiveTabId(null);
         setIsTabOpen(false);
+        setIsDirty(false);
         setSelectedNode(null);
         setEditData(null);
         setSearchHighlight(null);
@@ -2204,8 +2205,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     closeTab(tabId);
   }, [closeTab, pendingCloseTabId]);
 
+  const hasDirtyTabs =
+    Boolean(activeTabId && isDirty) ||
+    tabs.some((tab) => tab.id !== activeTabId && Boolean(tab.isDirty));
+
   useEffect(() => {
-    if (!isDirty) return undefined;
+    if (!hasDirtyTabs) return undefined;
 
     const onBeforeUnload = (event) => {
       event.preventDefault();
@@ -2214,7 +2219,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [isDirty]);
+  }, [hasDirtyTabs]);
 
   const loadReplays = useCallback(async () => {
     const name = currentReplayConcertName;

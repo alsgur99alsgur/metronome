@@ -27,3 +27,4 @@ events.md
 !backend/playings/tests/ff_untitled_concert.concert
 
 *.json
+!admin-frontend/package-lock.json

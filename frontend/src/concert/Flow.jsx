@@ -9,6 +9,15 @@ import DeployDialog from "./DeployDialog";
 import ConcertManagerDialog from "./ConcertManagerDialog";
 import StageResourcesDialog from "./StageResourcesDialog";
 
+const queryLocalPort = Number(
+  new URLSearchParams(window.location.search).get("localPort"),
+);
+const localServerPort =
+  Number.isInteger(queryLocalPort) && queryLocalPort >= 1 && queryLocalPort <= 65535
+    ? queryLocalPort
+    : 8000;
+const localApiBaseUrl = `http://localhost:${localServerPort}`;
+
 export default function Flow() {
   const tabViewRef = useRef(null);
   const resizeRef = useRef(null);
@@ -28,7 +37,7 @@ export default function Flow() {
     servers.find((server) => server.name === selectedServerName) || {
       name: "Local",
       host: "localhost",
-      port: 8000,
+      port: localServerPort,
     };
   const selectedApiBaseUrl = `http://${selectedServer.host}:${selectedServer.port}`;
 
@@ -55,7 +64,7 @@ export default function Flow() {
   };
 
   useEffect(() => {
-    fetch("http://localhost:8000/servers")
+    fetch(`${localApiBaseUrl}/servers`)
       .then((response) => response.json())
       .then((body) => {
         setServers(body.servers || []);

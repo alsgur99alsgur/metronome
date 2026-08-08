@@ -1,10 +1,16 @@
 import json
 import os
+import sys
 from pathlib import Path
 
 
 def _initialize_data_directory():
-    data_root = Path(os.environ["METRONOME_DATA_DIR"])
+    default_root = (
+        Path(sys.executable).parent
+        if getattr(sys, "frozen", False)
+        else Path(__file__).parent
+    )
+    data_root = Path(os.environ.setdefault("METRONOME_DATA_DIR", str(default_root)))
     data_root.mkdir(parents=True, exist_ok=True)
 
     defaults = {
@@ -34,12 +40,27 @@ def _initialize_data_directory():
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+    return data_root
+
+
+def _local_server_port(data_root):
+    servers = json.loads((data_root / "servers.json").read_text(encoding="utf-8"))
+    if not isinstance(servers, list):
+        raise ValueError("servers.json must contain an array.")
+    local_servers = [item for item in servers if item.get("name") == "Local"]
+    if len(local_servers) != 1:
+        raise ValueError("servers.json must contain exactly one Local server.")
+    port = local_servers[0].get("port")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Local server port must be an integer from 1 to 65535.")
+    return port
 
 
 if __name__ == "__main__":
-    _initialize_data_directory()
+    data_root = _initialize_data_directory()
+    local_port = _local_server_port(data_root)
 
     import uvicorn
     from main import app
 
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=local_port, log_level="info")

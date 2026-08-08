@@ -23,11 +23,13 @@ class ServerManager:
             if not 1 <= port <= 65535:
                 raise ValueError(f"Invalid port for server: {name}")
             servers[name] = {"name": name, "host": host, "port": port}
+        if "Local" not in servers:
+            raise ValueError("servers.json must contain a Local server.")
         return servers
 
     @property
     def primary(self):
-        return next(iter(self._read_servers().values()))
+        return self._read_servers()["Local"]
 
     def list(self):
         return list(self._read_servers().values())

@@ -7,6 +7,7 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendRoot = Join-Path $ProjectRoot "backend"
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
+$AdminFrontendRoot = Join-Path $ProjectRoot "admin-frontend"
 $BuildPython = Join-Path $BackendRoot ".venv-build\Scripts\python.exe"
 $PyInstaller = Join-Path $BackendRoot ".venv-build\Scripts\pyinstaller.exe"
 
@@ -25,6 +26,15 @@ finally {
 
 Push-Location $FrontendRoot
 try {
+    Push-Location $AdminFrontendRoot
+    try {
+        npm ci
+        npm run build
+    }
+    finally {
+        Pop-Location
+    }
+
     npm ci
     npm run build:win
 }
@@ -32,4 +42,4 @@ finally {
     Pop-Location
 }
 
-Write-Host "Installer created under frontend\release"
+Write-Host "Portable ZIP created under frontend\release"
