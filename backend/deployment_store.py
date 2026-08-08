@@ -160,6 +160,7 @@ class DeploymentStore:
         version = self.validate_version(payload.get("version"))
         if not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
             raise ValueError("Concert payload requires nodes and edges arrays.")
+        ConcertStore.validate_nodes(payload["nodes"])
         return {
             **payload,
             "concertId": concert_id,

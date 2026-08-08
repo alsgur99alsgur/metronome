@@ -91,7 +91,7 @@ export default function ConcertOutputPanel({
           return {
             id: node.id,
             index,
-            name: node.data?.name || node.id,
+            name: node.data.name,
             type: node.type,
             status,
             duration,

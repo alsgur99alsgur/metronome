@@ -116,7 +116,7 @@ const findLineMatches = (node, term) => {
       return {
         id: `${node.id}:${field.key}:${index + 1}`,
         nodeId: node.id,
-        nodeName: node.data?.name || node.id,
+        nodeName: node.data.name,
         nodeType: node.type,
         position: node.position || { x: 0, y: 0 },
         field: field.key,

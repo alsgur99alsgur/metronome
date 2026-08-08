@@ -35,12 +35,14 @@ LOOP_NODE_TYPES = {"loopIn", "loopOut"}
 
 
 def _safe_identifier(value):
-    safe = re.sub(r"\W+", "_", value or "").strip("_")
-    if not safe:
-        return "task"
-    if safe[0].isdigit():
-        return f"task_{safe}"
-    return safe
+    name = str(value or "")
+    if not name:
+        raise ValueError("Node name is required.")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+        raise ValueError(
+            "Node name may contain only English letters, numbers, and underscores."
+        )
+    return name
 
 
 @lru_cache(maxsize=4096)
@@ -626,7 +628,7 @@ def build_concert(
         data = node["data"]
         task_id = node["id"]
         node_type_by_id[task_id] = node_type
-        name = data["name"]
+        name = _safe_identifier(data.get("name"))
         if node_type == "dbRead":
             task_map[task_id] = _build_db_read_task(task_id, name, data, params)
         elif node_type == "python":

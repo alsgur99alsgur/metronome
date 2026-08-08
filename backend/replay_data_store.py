@@ -5,6 +5,8 @@ import re
 
 import pandas as pd
 
+from json_serialization import json_default
+
 
 class ReplayDataStore:
     def __init__(
@@ -32,7 +34,10 @@ class ReplayDataStore:
 
     @staticmethod
     def _safe_name(name):
-        return re.sub(r"[^a-zA-Z0-9_.-]+", "_", name or "").strip("_") or "untitled"
+        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(name or "")).strip("_")
+        if not safe:
+            raise ValueError("Replay path name is required.")
+        return safe
 
     @classmethod
     def _safe_replay_id(cls, name):
@@ -56,7 +61,14 @@ class ReplayDataStore:
         if self.loading_replay:
             return
         with open(os.path.join(self.path, "metadata.json"), "w", encoding="utf-8") as file:
-            json.dump(metadata, file, ensure_ascii=False, allow_nan=True, indent=2)
+            json.dump(
+                metadata,
+                file,
+                ensure_ascii=False,
+                allow_nan=True,
+                indent=2,
+                default=json_default,
+            )
 
     @staticmethod
     def _load_metadata(path):
@@ -106,7 +118,13 @@ class ReplayDataStore:
             return file.read()
 
     @classmethod
-    def list_replays(cls, base_path="./replay", concert_name=None, cache_lookup=None):
+    def list_replays(
+        cls,
+        base_path="./replay",
+        concert_name=None,
+        cache_lookup=None,
+        errors=None,
+    ):
         if not os.path.isdir(base_path):
             return []
 
@@ -127,18 +145,46 @@ class ReplayDataStore:
                 if replay_id == "cache":
                     continue
                 files = sorted(file_name for file_name in os.listdir(replay_path) if file_name.endswith(".parquet"))
-                metadata = cls._load_metadata(replay_path)
+                try:
+                    metadata = cls._load_metadata(replay_path)
+                except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+                    if errors is not None:
+                        errors.append({
+                            "concertName": current_concert,
+                            "replayId": replay_id,
+                            "error": f"Invalid Replay metadata: {exc}",
+                        })
+                    continue
                 if not files and not metadata:
                     continue
-                cache = cache_lookup(current_concert, replay_id) if cache_lookup else None
-                display_concert_name = metadata.get("concertName") or current_concert
+                missing_fields = [field for field in ("concertName", "createdAt") if not metadata.get(field)]
+                if missing_fields:
+                    if errors is not None:
+                        errors.append({
+                            "concertName": current_concert,
+                            "replayId": replay_id,
+                            "error": f"Replay metadata is missing required fields: {', '.join(missing_fields)}",
+                        })
+                    continue
+                try:
+                    cache = cache_lookup(current_concert, replay_id) if cache_lookup else None
+                except (json.JSONDecodeError, KeyError, OSError, TypeError, ValueError) as exc:
+                    cache = None
+                    message = f"Invalid Cache metadata: {exc}"
+                    if errors is not None and not any(item["error"] == message for item in errors):
+                        errors.append({
+                            "concertName": current_concert,
+                            "replayId": replay_id,
+                            "error": message,
+                        })
+                display_concert_name = metadata["concertName"]
 
                 replays.append(
                     {
                         "id": replay_id,
                         "concertName": display_concert_name,
                         "label": f"{display_concert_name}/{replay_id}",
-                        "createdAt": metadata.get("createdAt") or replay_id,
+                        "createdAt": metadata["createdAt"],
                         "trigger": metadata.get("trigger"),
                         "executedBy": metadata.get("executedBy", {}),
                         "sourceKind": metadata.get("sourceKind"),

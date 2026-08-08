@@ -27,7 +27,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 현재 창에�
 압축을 해제한 디렉터리에는 두 UI 실행 파일이 포함된다.
 
 - `metronome.exe`: 메인 UI와 백엔드를 함께 실행하고 종료한다.
-- `metronome_admin.exe`: Admin UI만 실행하며, 실행 중인 `metronome.exe`의 백엔드에 연결한다.
+- `metronome_admin.cmd`: Admin UI만 실행하며, 실행 중인 `metronome.exe`의 백엔드에 연결한다.
 
 Admin을 사용하려면 `metronome.exe`를 먼저 실행한다. 두 UI는 동일한 Electron 런타임을 공유하므로 런타임이 중복 패키징되지 않는다.
 

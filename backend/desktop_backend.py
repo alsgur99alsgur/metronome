@@ -61,6 +61,27 @@ if __name__ == "__main__":
     local_port = _local_server_port(data_root)
 
     import uvicorn
+    from fastapi import Header, HTTPException
     from main import app
 
-    uvicorn.run(app, host="0.0.0.0", port=local_port, log_level="info")
+    shutdown_token = os.environ.get("METRONOME_SHUTDOWN_TOKEN")
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="0.0.0.0", port=local_port, log_level="info")
+    )
+
+    def require_desktop_token(token):
+        if not shutdown_token or token != shutdown_token:
+            raise HTTPException(status_code=403, detail="Invalid desktop token.")
+
+    @app.get("/desktop/health", include_in_schema=False)
+    def desktop_health(x_metronome_token: str = Header(default="")):
+        require_desktop_token(x_metronome_token)
+        return {"status": "ok"}
+
+    @app.post("/desktop/shutdown", include_in_schema=False)
+    def desktop_shutdown(x_metronome_token: str = Header(default="")):
+        require_desktop_token(x_metronome_token)
+        server.should_exit = True
+        return {"status": "stopping"}
+
+    server.run()

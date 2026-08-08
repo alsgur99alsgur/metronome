@@ -12,13 +12,14 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cache_data_store import CacheDataStore
 from concert_store import ConcertStore
 from deployment_store import DeploymentMismatchError, DeploymentStore
 from concert_builder import build_concert, collect_dependencies, selected_concert_graph
 from executor import Executor
+from json_serialization import json_default
 from oracle_client import (
     OracleUnavailable,
     describe_oracle_query,
@@ -83,11 +84,11 @@ class RunRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-class TriggerRunRequest(BaseModel):
+class EventRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     concertName: str
     params: dict[str, Any] = Field(default_factory=dict)
-    mode: str = "all"
-    selected: Optional[str] = None
 
 
 class TimerRequest(BaseModel):
@@ -244,13 +245,13 @@ def _run_source_metadata(trigger, request=None):
                 "clientIp": client_host,
             },
         }
-    if trigger == "scheduler":
+    if trigger == "timer":
         return {
-            "sourceKind": "scheduler",
-            "sourceLabel": "Scheduler",
-            "sourceDetail": "Scheduled run",
-            "callerName": "scheduler",
-            "executedBy": {"type": "scheduler"},
+            "sourceKind": "timer",
+            "sourceLabel": "Timer",
+            "sourceDetail": "Timer-triggered run",
+            "callerName": "timer",
+            "executedBy": {"type": "timer"},
         }
     if trigger == "event":
         return {
@@ -302,7 +303,12 @@ resource_store = ResourceStore(STAGE_ROOT, TMP_ROOT)
 server_manager = ServerManager(SERVERS_PATH)
 timer_manager = TimerManager(
     TIMERS_PATH,
-    run_callback=lambda timer: _queue_timer(timer),
+    run_callback=lambda concert_name, params: _queue_saved_concert(
+        concert_name,
+        params,
+        trigger="timer",
+        cache_enabled=False,
+    ),
     status_callback=lambda run_id: _timer_run_state(run_id),
 )
 
@@ -373,7 +379,14 @@ def _finish_cache(replay_root, cache_id, status, finished_at=None, timing=None):
     if timing is not None:
         metadata["timing"] = timing
     with open(os.path.join(cache_path, "metadata.json"), "w", encoding="utf-8") as file:
-        json.dump(metadata, file, ensure_ascii=False, allow_nan=True, indent=2)
+        json.dump(
+            metadata,
+            file,
+            ensure_ascii=False,
+            allow_nan=True,
+            indent=2,
+            default=json_default,
+        )
 
 
 def _run_in_background(
@@ -575,6 +588,8 @@ def get_playing(concert_name: str):
         return concert_store.load(concert_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/playings-by-id/{concert_id}")
@@ -980,7 +995,7 @@ def _queue_run(
             continue
         node_states[node_id] = {
             "id": node_id,
-            "name": (node.get("data") or {}).get("name", node_id),
+            "name": node["data"]["name"],
             "type": node.get("type", ""),
             "status": "pending",
             "logs": "",
@@ -1142,21 +1157,26 @@ def _queue_run(
     }
 
 
-def _queue_timer(timer):
-    try:
-        concert = concert_store.load(timer["concertName"])
-    except FileNotFoundError as exc:
-        raise ValueError(str(exc)) from exc
+def _queue_saved_concert(
+    concert_name,
+    params,
+    *,
+    trigger,
+    request=None,
+    cache_enabled=True,
+):
+    concert = concert_store.load(concert_name)
     return _queue_run(
-        concert_name=concert.get("name") or timer["concertName"],
+        concert_name=concert["name"],
         concert_id=concert["concertId"],
         nodes=concert["nodes"],
         edges=concert["edges"],
-        params=timer.get("params", {}),
+        params=params,
         global_variables=concert["globalVariables"],
         input_variables=concert["inputVariables"],
-        trigger="scheduler",
-        cache_enabled=False,
+        trigger=trigger,
+        request=request,
+        cache_enabled=cache_enabled,
     )
 
 
@@ -1185,46 +1205,19 @@ def _timer_run_state(run_id):
     return CacheDataStore.load_run(REPLAY_ROOT, run_id)
 
 
-@app.post("/scheduler/run")
-def scheduler_run(req: TriggerRunRequest, request: Request):
-    try:
-        concert = concert_store.load(req.concertName)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _queue_run(
-        concert_name=concert.get("name") or req.concertName,
-        concert_id=concert["concertId"],
-        nodes=concert["nodes"],
-        edges=concert["edges"],
-        mode=req.mode,
-        selected=req.selected,
-        params=req.params,
-        global_variables=concert["globalVariables"],
-        input_variables=concert["inputVariables"],
-        trigger="scheduler",
-        request=request,
-    )
-
-
 @app.post("/events/trigger")
-def event_trigger(req: TriggerRunRequest, request: Request):
+def event_trigger(req: EventRunRequest, request: Request):
     try:
-        concert = concert_store.load(req.concertName)
+        return _queue_saved_concert(
+            req.concertName,
+            req.params,
+            trigger="event",
+            request=request,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _queue_run(
-        concert_name=concert.get("name") or req.concertName,
-        concert_id=concert["concertId"],
-        nodes=concert["nodes"],
-        edges=concert["edges"],
-        mode=req.mode,
-        selected=req.selected,
-        params=req.params,
-        global_variables=concert["globalVariables"],
-        input_variables=concert["inputVariables"],
-        trigger="event",
-        request=request,
-    )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid Concert: {exc}") from exc
 
 
 @app.get("/runs/{run_id}")
@@ -1335,8 +1328,9 @@ def cancel_run(run_id: str):
 
 @app.get("/replays")
 def list_replays(concertName: Optional[str] = Query(default=None)):
-    return {
-        "replays": ReplayDataStore.list_replays(
+    errors = []
+    try:
+        replays = ReplayDataStore.list_replays(
             REPLAY_ROOT,
             concert_name=concertName,
             cache_lookup=lambda concert_name, replay_id: CacheDataStore.latest_for_replay(
@@ -1344,8 +1338,11 @@ def list_replays(concertName: Optional[str] = Query(default=None)):
                 concert_name,
                 replay_id,
             ),
+            errors=errors,
         )
-    }
+        return {"replays": replays}
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/replays/cache")

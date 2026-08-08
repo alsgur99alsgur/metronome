@@ -187,7 +187,7 @@ class TimerManager:
     def _execute(self, timer):
         run_at = _now_iso()
         try:
-            result = self.run_callback(self._public(timer))
+            result = self.run_callback(timer["concertName"], timer.get("params", {}))
             run_id = result.get("runId") if isinstance(result, dict) else None
             status = result.get("status", "queued") if isinstance(result, dict) else "queued"
             error = None

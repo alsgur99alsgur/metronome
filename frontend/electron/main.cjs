@@ -1,12 +1,15 @@
 const { app, BrowserWindow, dialog } = require("electron");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
 let backendProcess = null;
+let backendExitError = null;
+const backendToken = crypto.randomUUID();
 
 function isAdminApp() {
-  return path.basename(app.getPath("exe")).toLowerCase() === "metronome_admin.exe";
+  return process.argv.includes("--admin");
 }
 
 app.setPath(
@@ -53,25 +56,32 @@ function startBackend() {
     throw new Error(`Backend executable not found: ${executable}`);
   }
 
+  backendExitError = null;
   backendProcess = spawn(executable, [], {
     cwd: installDirectory(),
     env: {
       ...process.env,
       METRONOME_DATA_DIR: installDirectory(),
+      METRONOME_SHUTDOWN_TOKEN: backendToken,
     },
     windowsHide: true,
     stdio: "ignore",
   });
-  backendProcess.once("exit", () => {
+  backendProcess.once("exit", (code) => {
+    if (code !== 0) backendExitError = `Backend exited with code ${code}.`;
     backendProcess = null;
   });
 }
 
-async function waitForBackend(port, timeoutMs = 30000) {
+async function waitForBackend(port, adminApp, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (!adminApp && backendExitError) throw new Error(backendExitError);
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/health`);
+      const endpoint = adminApp ? "/health" : "/desktop/health";
+      const response = await fetch(`http://127.0.0.1:${port}${endpoint}`, {
+        headers: adminApp ? {} : { "X-Metronome-Token": backendToken },
+      });
       if (response.ok) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -83,7 +93,7 @@ async function createWindow() {
   const adminApp = isAdminApp();
   const localPort = localServerPort();
   if (!adminApp) startBackend();
-  await waitForBackend(localPort);
+  await waitForBackend(localPort, adminApp);
 
   const window = new BrowserWindow({
     width: adminApp ? 1440 : 1600,
@@ -123,22 +133,51 @@ async function createWindow() {
   window.once("ready-to-show", () => window.show());
 }
 
-function stopBackend() {
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
+function waitForBackendExit(process, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!process || process.exitCode !== null) return resolve(true);
+    const timeout = setTimeout(() => resolve(false), timeoutMs);
+    process.once("exit", () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
+async function stopBackend() {
+  const process = backendProcess;
+  if (!process) return;
+
+  try {
+    await fetch(`http://127.0.0.1:${localServerPort()}/desktop/shutdown`, {
+      method: "POST",
+      headers: { "X-Metronome-Token": backendToken },
+    });
+  } catch {}
+
+  if (await waitForBackendExit(process, 3000)) return;
+  if (global.process.platform === "win32") {
+    const killer = spawn(
+      "taskkill",
+      ["/pid", String(process.pid), "/T", "/F"],
+      { windowsHide: true, stdio: "ignore" },
+    );
+    await new Promise((resolve) => killer.once("exit", resolve));
+  } else {
+    process.kill("SIGKILL");
   }
 }
 
-app.whenReady().then(createWindow).catch((error) => {
+app.whenReady().then(createWindow).catch(async (error) => {
   const detail = isAdminApp()
     ? `${error.message}\n\nStart metronome.exe first.`
     : error.message;
   dialog.showErrorBox("Metronome startup failed", detail);
+  if (!isAdminApp()) await stopBackend();
   app.quit();
 });
 
-app.on("before-quit", () => {
-  if (!isAdminApp()) stopBackend();
+app.on("window-all-closed", async () => {
+  if (!isAdminApp()) await stopBackend();
+  app.quit();
 });
-app.on("window-all-closed", () => app.quit());

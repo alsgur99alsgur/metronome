@@ -1,103 +1,108 @@
 # Metronome Agent Notes
 
-이 파일을 먼저 보고 작업 범위를 좁힌다. 전체 검색 전에 아래 기능별 파일을 우선 확인해서 토큰을 아낀다.
+이 문서를 먼저 읽고 작업 범위를 좁힌다. Metronome은 Concert 그래프 편집 데스크톱 앱, FastAPI 실행 서버, 별도 관리 앱으로 구성된다. 과거 DAG 명칭이나 삭제된 `frontend/src/dag`, `backend/dag_*` 경로를 기준으로 작업하지 않는다.
 
 ## Project Root
 
-- 실제 프로젝트: `/Users/mh/Desktop/metronome`
-- Frontend: `/Users/mh/Desktop/metronome/frontend`
-- Backend: `/Users/mh/Desktop/metronome/backend`
-- DAG 저장소: `/Users/mh/Desktop/metronome/backend/dags`
-- Replay 저장소: `/Users/mh/Desktop/metronome/backend/replay`
+- 프로젝트: `/Users/mh/Desktop/metronome`
+- 데스크톱 프런트엔드: `frontend`
+- FastAPI 백엔드 및 런타임 데이터: `backend`
+- 관리 앱: `admin-frontend`
+- Windows 패키징 진입점: `build-windows.ps1`
 
-## Frontend DAG 화면
+상세 구조는 다음 문서를 먼저 확인한다.
 
-- 앱 셸/상단 File 메뉴 연결: `frontend/src/dag/Flow.jsx`
-- 메인 DAG 화면/탭/상태/실행/저장/툴바/모달 연결: `frontend/src/dag/DagTabView.jsx`
-- DAG 전체 스타일: `frontend/src/dag/Flow.css`
-- React Flow node type 매핑: `frontend/src/dag/nodeTypes.js`
-- 노드 렌더링/아이콘/상태/rows/time 표시: `frontend/src/dag/Node.jsx`
-- 커스텀 edge 렌더링: `frontend/src/dag/CenterEdge.jsx`
+- 프런트엔드: `frontend/ARCHITECTURE.md`
+- 백엔드: `backend/ARCHITECTURE.md`
+- 관리 앱: `admin-frontend/ARCHITECTURE.md`
 
-## Frontend Editors
+## Fast Routing Map
 
-- Query/Write 노드 에디터, DB connection 목록, query describe: `frontend/src/dag/QueryEditor.jsx`
-- Python 노드 에디터, 기본 Python template, input/output columns panel: `frontend/src/dag/PythonEditor.jsx`
-- DAG Call 노드 에디터, 로컬 DAG 파일 open, 호출 DAG input parameter 필드: `frontend/src/dag/DagCallEditor.jsx`
-- `dagInput` 노드 에디터: `frontend/src/dag/InputEditor.jsx`
-- `dagOutput` 노드 에디터: `frontend/src/dag/OutputEditor.jsx`
+### Concert 편집 화면
 
-## Frontend Modals
+- 앱 셸, 서버 선택, File/Stage/View 메뉴, 좌측 Concert 목록: `frontend/src/concert/Flow.jsx`
+- 탭, 그래프 상태, 저장/열기, 실행/Replay, 에디터·모달 연결: `frontend/src/concert/ConcertTabView.jsx`
+- 공통 스타일: `frontend/src/concert/Flow.css`
+- React Flow 노드/edge: `Node.jsx`, `nodeTypes.js`, `CenterEdge.jsx`
+- Concert/노드 이름 검증: `frontend/src/concert/nameValidation.js`; 백엔드 재검증은 `backend/concert_store.py`, `backend/concert_builder.py`
 
-- 변수 관리 모달, input/global variables 편집: `frontend/src/dag/VariablesDialog.jsx`
-- 실행 전 input parameter 입력 모달: `frontend/src/dag/RunParamsDialog.jsx`
-- Replay point 선택/Open 모달: `frontend/src/dag/ReplayDialog.jsx`
-- 에디터 닫기 전 저장 확인 모달: `frontend/src/dag/SaveChangesDialog.jsx`
-- 실행 중 표시/Cancel 모달: `frontend/src/dag/RunningDialog.jsx`
+### Node editors
 
-## Frontend Search/Data Viewer
+- DB Read/Write: `DbEditor.jsx`
+- Python: `PythonEditor.jsx`
+- OPL/Pyomo preview: `OplEditor.jsx`; 실제 모델 실행은 `backend/opl_builder.py`
+- Concert Call: `ConcertCallEditor.jsx`
+- Cache/File resource: `ResourceEditor.jsx`
+- Concert Input/Output: `InputEditor.jsx`, `OutputEditor.jsx`
 
-- DAG 검색 패널, 드래그 resize, 검색 결과 클릭: `frontend/src/dag/DagSearch.jsx`
-- 노드 결과 데이터 별도 창, filter/sort/csv download: `frontend/src/dag/DataViewerWindow.jsx`
+### Dialogs and panels
 
-## Backend API
+- 입력/전역 변수: `VariablesDialog.jsx`
+- 실행 파라미터: `RunParamsDialog.jsx`
+- Replay 선택: `ReplayDialog.jsx`
+- 실행/취소: `RunningDialog.jsx`
+- 배포/Rehearsal: `DeployDialog.jsx`
+- Playing/Rehearsal/Backup 관리: `ConcertManagerDialog.jsx`, `ConcertListPanel.jsx`, `ConcertFileTable.jsx`
+- Stage resource: `StageResourcesDialog.jsx`
+- 검색/실행 결과: `ConcertSearch.jsx`, `ConcertOutputPanel.jsx`, `DataViewerWindow.jsx`
 
-- FastAPI entrypoint, routes, run queue, cancel, scheduler/event trigger, replay list: `backend/main.py`
-- JSON response `allow_nan=True`: `backend/main.py`
-- API models: `DagSaveRequest`, `RunRequest`, `TriggerRunRequest`, `QueryDescribeRequest` in `backend/main.py`
+### Backend
 
-## Backend DAG Build/Execution Logic
+- API 모델·route·run queue·timer/event/replay: `backend/main.py`
+- node JSON → Task graph, Concert Call/loop/선택 실행: `backend/concert_builder.py`
+- worker 실행, cancel/timeout/replay/cache event: `backend/executor.py`
+- Concert 저장·이름/노드 검증: `backend/concert_store.py`
+- Rehearsal/Playing/Backup transaction: `backend/deployment_store.py`
+- Replay parquet/metadata: `backend/replay_data_store.py`
+- 실행 런 캐시: `backend/cache_data_store.py`
+- Stage cache/file resource: `backend/resource_store.py`
+- Oracle pool/query/write/schema cache: `backend/oracle_client.py`
+- Timer 저장·polling: `backend/timer_manager.py`
+- 데스크톱 데이터 초기화·shutdown route: `backend/desktop_backend.py`
 
-- Node JSON을 Task graph로 변환: `backend/dag_builder.py`
-- Query/Python/Write/DAG Call/`dagInput`/`dagOutput` task 생성: `backend/dag_builder.py`
-- `$variable` SQL/Python rewrite: `backend/dag_builder.py`
-- Python node scope에 `pd`, `pandas`, `np`, `numpy`, `dag_vars`, `params` 제공: `backend/dag_builder.py`
-- Query input DataFrame rows를 bind records로 한 번에 실행: `backend/dag_builder.py`
-- DAG Call 실행, self-call 방지, 호출 DAG input/output 처리: `backend/dag_builder.py`
-- 선택 실행 dependency 수집: `collect_dependencies` in `backend/dag_builder.py`
+### Admin app
 
-## Backend Runtime Executor
+- 서버 열기, Timer 편집, DB Connection 편집: `admin-frontend/src/App.jsx`
+- 전체 스타일: `admin-frontend/src/styles.css`
 
-- Thread worker executor, timeout, cancel event, node event callback: `backend/executor.py`
-- Replay mode에서 query/`dagInput` load/save: `backend/executor.py`
-- DataFrame result summary, preview/data rows, duration/rows metadata 생성: `backend/executor.py`
+## Runtime Data
 
-## Backend Persistence
+`METRONOME_DATA_DIR`가 설정되면 백엔드 데이터는 해당 경로를 사용하고, 없으면 `backend`를 사용한다.
 
-- DAG JSON save/load/list, 저장 전 runtime 필드 제거: `backend/dag_store.py`
-- Replay parquet save/load/list, metadata load/save: `backend/replay_data_store.py`
-- Task primitive and parent/child links: `backend/task.py`
+- Playing Concert: `playings/*.concert`
+- Rehearsal: `rehearsals/*.concert`
+- Backup: `backups/*.concert`
+- Replay/런 캐시: `replay/<concert>/<replay-id>/`
+- Stage resource: `stage/`
+- 설정: `config.json`, `servers.json`, `connections.json`, `timers.json`
 
-## Backend Oracle
+저장된 runtime 데이터 파일을 테스트 fixture처럼 임의 수정하지 않는다.
 
-- Oracle connection config: `backend/connections.json`
-- Oracle client, connection pool, query describe/execute/executemany records: `backend/oracle_client.py`
-- Oracle unavailable fallback exception: `OracleUnavailable` in `backend/oracle_client.py`
+## Current Schema Rules
 
-## Common Feature Map
-
-- 노드 모양/아이콘/선택 그림자: `Node.jsx`, `Flow.css`
-- Query/Python editor fullscreen modal: `DagTabView.jsx`, `Flow.css`, `QueryEditor.jsx`, `PythonEditor.jsx`
-- Search 패널 위치/resize/layout: `DagSearch.jsx`, `Flow.css`
-- 변수 UI/input/global variables: `VariablesDialog.jsx`, state wiring in `DagTabView.jsx`
-- 실행 파라미터 입력 모달: `RunParamsDialog.jsx`
-- Replay point modal/open/run buttons: `ReplayDialog.jsx` and toolbar in `DagTabView.jsx`, backend `replay_data_store.py`, `main.py`
-- Running modal/cancel: `RunningDialog.jsx`, `/runs/{run_id}/cancel` in `main.py`, cancel handling in `executor.py`
-- DAG 파일 저장 payload 정리: `cleanNodeDataForSave`, `cleanEdgeForSave` in `DagTabView.jsx`, backend cleanup in `dag_store.py`
-- DAG Call 편집 저장 문제: `DagCallEditor.jsx`, `saveEditor` and `editableNodeData` in `DagTabView.jsx`
-- DAG Call 실제 실행 문제: `_build_dag_call_task`, `_execute_task_graph`, `_build_input_task`, `_build_output_task` in `dag_builder.py`
+- 현재 Concert schema와 현재 코드만 지원한다. 구형 DAG/Concert/replay 필드 alias나 fallback을 추가하지 않는다.
+- 잘못되거나 누락된 필드는 조용히 보정하지 말고 사용자 또는 API 호출자에게 명시적으로 실패시킨다.
+- Concert 파일 이름과 노드 이름은 영문자, 숫자, underscore만 허용한다: `^[A-Za-z0-9_]+$`.
+- React Flow 예약 타입 `input`/`output` 대신 `concertInput`/`concertOutput`을 사용한다.
+- 저장 시 runtime 필드(`status`, `runRows`, `runDurationMs`, `runLoopIterations`, `outputColumns`, `schemaError`)와 edge 표시 필드(`type`, `markerEnd`, handles)를 제거한다.
+- 모바일/좁은 화면 대응은 범위에 포함하지 않는다. 데스크톱 레이아웃을 기준으로 한다.
 
 ## Validation Commands
 
-- Frontend build: `npm run build` in `/Users/mh/Desktop/metronome/frontend`
-- Backend syntax check without writing project `__pycache__`:
-  - `PYTHONPYCACHEPREFIX=/tmp/metronome_pycache python3 -m py_compile /Users/mh/Desktop/metronome/backend/main.py /Users/mh/Desktop/metronome/backend/app_config.py /Users/mh/Desktop/metronome/backend/cache_data_store.py /Users/mh/Desktop/metronome/backend/dag_builder.py /Users/mh/Desktop/metronome/backend/dag_store.py /Users/mh/Desktop/metronome/backend/executor.py /Users/mh/Desktop/metronome/backend/oracle_client.py /Users/mh/Desktop/metronome/backend/replay_data_store.py /Users/mh/Desktop/metronome/backend/task.py`
+- 프런트 빌드: `cd /Users/mh/Desktop/metronome/frontend && npm run build`
+- 관리 앱 빌드: `cd /Users/mh/Desktop/metronome/admin-frontend && npm run build`
+- 백엔드 구문 검사:
+
+```bash
+cd /Users/mh/Desktop/metronome
+PYTHONPYCACHEPREFIX=/tmp/metronome_pycache backend/.venv/bin/python -m py_compile backend/main.py backend/app_config.py backend/cache_data_store.py backend/concert_builder.py backend/concert_store.py backend/deployment_store.py backend/desktop_backend.py backend/executor.py backend/json_serialization.py backend/opl_builder.py backend/oracle_client.py backend/replay_data_store.py backend/resource_store.py backend/schema_inference.py backend/server_manager.py backend/task.py backend/timer_manager.py backend/variable_types.py
+```
+
+- 프런트 lint는 기존 저장소 전체 lint 상태와 작업 범위를 구분해서 판단한다: `npm run lint`.
 
 ## Editing Notes
 
-- 현재 DAG 스키마와 현재 코드 구조만 기준으로 구현한다.
-- 예전 DAG 파일, 예전 필드명, 예전 노드 타입, 예전 replay metadata, 삭제된 모듈 구조를 지원하는 fallback·alias·변환·조건 분기를 작성하지 않는다.
-- 구형 데이터가 현재 스키마와 맞지 않으면 조용히 보정하지 말고 명시적으로 실패하게 한다.
-- UI 작업 시 모바일/좁은 화면 대응은 고려하지 않는다. 데스크톱 기준 화면만 맞춘다.
-- React Flow 예약 타입인 `input`/`output`은 쓰지 않는다. DAG용 타입은 `dagInput`/`dagOutput`을 사용한다.
-- DAG 파일에는 실행 중 생성되는 `runRows`, `runDurationMs`, `outputColumns`, edge `type`, `markerEnd`를 저장하지 않는다.
+- dirty worktree의 관련 없는 변경은 사용자 작업으로 간주하고 보존한다.
+- 프런트/백엔드 양쪽에 같은 schema 검증이 있다면 사용자 피드백은 프런트에서, 우회 방지는 백엔드에서 담당한다.
+- API payload나 저장 schema를 바꾸면 `frontend`, `backend`, `admin-frontend` 소비자를 모두 검색한다.
+- Electron 패키징 변경은 `frontend/electron/main.cjs`, `after-pack.cjs`, `frontend/package.json`, `build-windows.ps1`을 함께 확인한다.

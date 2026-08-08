@@ -11,18 +11,28 @@ class ConcertStore:
 
     @staticmethod
     def safe_name(name):
-        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", name or "").strip("_")
-        return safe or "untitled_concert"
+        value = str(name or "")
+        if not value:
+            raise ValueError("Concert name is required.")
+        if not re.fullmatch(r"[A-Za-z0-9_]+", value):
+            raise ValueError(
+                "Concert name may contain only English letters, numbers, and underscores."
+            )
+        return value
 
     @classmethod
     def safe_path_name(cls, name):
-        text = str(name or "").replace("\\", "/").strip("/")
-        parts = [
-            cls.safe_name(part)
-            for part in text.split("/")
-            if part and part not in (".", "..")
-        ]
-        return "/".join(parts) or "untitled_concert"
+        text = str(name or "").replace("\\", "/")
+        if not text or text.startswith("/") or text.endswith("/"):
+            raise ValueError("Concert name is required.")
+        parts = text.split("/")
+        concert_name = cls.safe_name(parts.pop())
+        if any(
+            part in {"", ".", ".."} or not re.fullmatch(r"[A-Za-z0-9_.-]+", part)
+            for part in parts
+        ):
+            raise ValueError(f"Invalid Concert directory: {name}")
+        return "/".join([*parts, concert_name])
 
     def _path_for(self, name):
         concert_name = self.safe_path_name(name)
@@ -38,6 +48,20 @@ class ConcertStore:
             return str(UUID(str(concert_id)))
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValueError(f"Invalid {field_name}: {concert_id}") from exc
+
+    @staticmethod
+    def validate_nodes(nodes):
+        if not isinstance(nodes, list):
+            raise ValueError("Concert nodes must be an array.")
+        for node in nodes:
+            data = node.get("data") if isinstance(node, dict) else None
+            node_name = data.get("name") if isinstance(data, dict) else None
+            if not node_name:
+                raise ValueError("Node name is required.")
+            if not re.fullmatch(r"[A-Za-z0-9_]+", str(node_name)):
+                raise ValueError(
+                    "Node name may contain only English letters, numbers, and underscores."
+                )
 
     def _id_registry(self):
         registry = {}
@@ -98,6 +122,7 @@ class ConcertStore:
         concert_id = self.validate_id(concert_id)
         registry = self._id_registry()
         concert_name = self.safe_path_name(name)
+        self.validate_nodes(nodes)
         if os.path.basename(concert_name) != concert_name:
             raise ValueError("Concert name must not contain a directory.")
         existing_name = registry.get(concert_id)
@@ -124,11 +149,20 @@ class ConcertStore:
         return payload
 
     def load(self, name):
-        path = self._path_for(name)
+        requested_name = self.safe_path_name(name)
+        path = self._path_for(requested_name)
         if not os.path.exists(path):
             raise FileNotFoundError(f"Concert not found: {name}")
         with open(path, "r", encoding="utf-8") as file:
-            return json.load(file)
+            payload = json.load(file)
+        payload_name = self.safe_name(payload.get("name"))
+        expected_name = os.path.basename(requested_name)
+        if payload_name != expected_name:
+            raise ValueError(
+                f"Concert name mismatch: file is {expected_name}, but payload name is {payload_name}."
+            )
+        self.validate_nodes(payload.get("nodes"))
+        return payload
 
     def list(self):
         concerts = []

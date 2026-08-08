@@ -44,6 +44,7 @@ import VariablesDialog from "./VariablesDialog";
 import { coerceVariableValue } from "./variableTypes";
 import { nodeIcon, nodeStyle } from "./Node";
 import { nodeTypes } from "./nodeTypes";
+import { concertBaseName, validateConcertName, validateConcertPath, validateNodeName } from "./nameValidation";
 
 const makeId = () => crypto.randomUUID();
 let lastNodeIdBase = "";
@@ -103,13 +104,7 @@ const safeName = (value) => {
   return /^\d/.test(safe) ? `task_${safe}` : safe;
 };
 
-const safeConcertPathName = (value) =>
-  String(value || "")
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((part) => safeName(part))
-    .filter(Boolean)
-    .join("/");
+const safeConcertPathName = validateConcertPath;
 
 const normalizeEdge = (edge) => ({
   ...edge,
@@ -179,8 +174,6 @@ const cloneValue = (value) => {
   }
   return JSON.parse(JSON.stringify(value));
 };
-
-const concertBaseName = (value) => safeName(String(value || "").replace(/\\/g, "/").split("/").pop());
 
 const createBlankTab = () => ({
   id: makeId(),
@@ -478,7 +471,7 @@ const initialNodes = [];
 const initialEdges = [];
 
 const getFileNameBase = (fileName) =>
-  safeName((fileName || "untitled_concert").replace(/\.concert$/i, ""));
+  validateConcertName(String(fileName ?? "").replace(/\.concert$/i, ""));
 
 const normalizeVariableName = (value) => {
   const name = String(value || "")
@@ -1120,12 +1113,13 @@ function EditorPanel({
           className="text-input"
           value={editData.name || ""}
           onChange={(event) => {
-            const nextName = safeName(event.target.value);
+            const nextName = event.target.value;
             setEditData((current) => ({
               ...current,
-              name: event.target.value,
+              name: nextName,
               code:
                 selectedNode.type === "python" &&
+                /^[A-Za-z0-9_]+$/.test(nextName) &&
                 (!current.code ||
                   current.code.includes(`func_${safeName(current.name)}`))
                   ? pythonTemplate(nextName)
@@ -1742,7 +1736,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     ? historyLabel(redoStack[redoStack.length - 1])
     : "";
 
-  const currentReplayConcertName = safeConcertPathName(concertName) || safeName(concertName);
+  const currentReplayConcertName = safeConcertPathName(concertName);
   const visibleReplays = useMemo(
     () => replays.filter((replay) => replay.concertName === currentReplayConcertName),
     [currentReplayConcertName, replays],
@@ -1773,9 +1767,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const concertPayload = useCallback(
     (nameOverride = null, versionOverride = null) => {
-      const nextName =
-        safeConcertPathName(nameOverride || concertName) ||
-        safeName(nameOverride || concertName);
+      const nextName = safeConcertPathName(nameOverride || concertName);
       return {
         concertId,
         lastCommitId,
@@ -1784,7 +1776,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         name: nextName,
         globalVariables: variablePayload(globalVariables),
         inputVariables: variablePayload(inputVariables, "defaultValue"),
-        nodes: nodes.map(cleanNodeForSave),
+        nodes: nodes.map((node) => {
+          validateNodeName(node.data?.name);
+          return cleanNodeForSave(node);
+        }),
         edges: edges.map(cleanEdgeForSave),
       };
     },
@@ -1794,7 +1789,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const createTabFromConcertPayload = useCallback(
     (
       payload,
-      { fallbackName = "untitled_concert", fileHandle = null, fileLabel = "" } = {},
+      { expectedName = "", fileHandle = null, fileLabel = "" } = {},
     ) => {
       if (typeof payload.version !== "string") {
         throw new Error("Concert version must be a string.");
@@ -1802,12 +1797,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (!Object.hasOwn(payload, "lastCommitId") || !Object.hasOwn(payload, "commitId")) {
         throw new Error("Concert requires lastCommitId and commitId fields.");
       }
-      const fallbackSafeName = concertBaseName(fallbackName);
-      const payloadName = concertBaseName(payload.name || "");
-      const nextName =
-        payloadName && payloadName !== "untitled_concert"
-          ? payloadName
-          : fallbackSafeName;
+      const nextName = concertBaseName(payload.name);
+      if (expectedName && concertBaseName(expectedName) !== nextName) {
+        throw new Error(
+          `Concert name mismatch: file is ${concertBaseName(expectedName)}, but payload name is ${nextName}.`,
+        );
+      }
       return {
         ...createBlankTab(),
         concertId: payload.concertId,
@@ -1817,10 +1812,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         concertFileLabel: fileLabel || nextName,
         concertFileHandle: fileHandle,
         version: payload.version,
-        nodes: payload.nodes.map((node) => ({
-          ...node,
-          data: { ...node.data, status: "idle" },
-        })),
+        nodes: payload.nodes.map((node) => {
+          validateNodeName(node.data?.name);
+          return {
+            ...node,
+            data: { ...node.data, status: "idle" },
+          };
+        }),
         edges: payload.edges.map(normalizeEdge),
         globalVariables: payload.globalVariables,
         inputVariables: payload.inputVariables,
@@ -1974,8 +1972,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   };
 
   const saveConcertAsLocal = async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
-    if (!isTabOpen) return safeName(concertName);
-    const fileName = `${safeName(concertName)}.concert`;
+    if (!isTabOpen) return validateConcertName(concertName);
+    const fileName = `${validateConcertName(concertName)}.concert`;
     if ("showSaveFilePicker" in window) {
       const handle = await window.showSaveFilePicker({
         suggestedName: fileName,
@@ -1997,7 +1995,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return nextName;
     }
 
-    const nextName = deploymentName || safeConcertPathName(concertName) || safeName(concertName);
+    const nextName = deploymentName ? safeConcertPathName(deploymentName) : safeConcertPathName(concertName);
     const payload = { ...concertPayload(nextName, versionOverride), ...(commitOverrides || {}) };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -2017,7 +2015,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   };
 
   const saveConcertLocal = async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
-    if (!isTabOpen) return safeName(concertName);
+    if (!isTabOpen) return validateConcertName(concertName);
     if (concertFileHandle && "createWritable" in concertFileHandle) {
       const nextName = getFileNameBase(concertFileHandle.name || concertName);
       const payloadName = deploymentName || nextName;
@@ -2038,7 +2036,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         JSON.parse(await file.text()),
       );
       openConcertPayloadInTab(payload, {
-        fallbackName: getFileNameBase(file.name),
+        expectedName: getFileNameBase(file.name),
         fileHandle: handle,
         fileLabel: getFileNameBase(file.name),
       });
@@ -2060,7 +2058,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         : `${apiBaseUrl}/playings/${path}`);
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
       const payload = await inferConcertPayloadColumns(await response.json());
-      openConcertPayloadInTab(payload, { fallbackName: name, fileLabel: name.split("/").pop() });
+      openConcertPayloadInTab(payload, { expectedName: name, fileLabel: name.split("/").pop() });
     })();
     openingServerConcertsRef.current.set(key, operation);
     try {
@@ -2083,7 +2081,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
       const payload = await inferConcertPayloadColumns(await response.json());
       const fileLabel = item.path.split("/").pop().replace(/\.concert$/, "");
-      openConcertPayloadInTab(payload, { fallbackName: item.name, fileLabel, matchName: false });
+      openConcertPayloadInTab(payload, { expectedName: item.name, fileLabel, matchName: false });
     })();
     openingServerConcertsRef.current.set(key, operation);
     try {
@@ -2098,12 +2096,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const payload = await inferConcertPayloadColumns(JSON.parse(await file.text()));
-    openConcertPayloadInTab(payload, {
-      fallbackName: getFileNameBase(file.name),
-      fileHandle: null,
-      fileLabel: getFileNameBase(file.name),
-    });
+    try {
+      const payload = await inferConcertPayloadColumns(JSON.parse(await file.text()));
+      openConcertPayloadInTab(payload, {
+        expectedName: getFileNameBase(file.name),
+        fileHandle: null,
+        fileLabel: getFileNameBase(file.name),
+      });
+    } catch (error) {
+      window.alert(`Open Concert failed: ${error.message}`);
+    }
   };
 
   const handleConcertFileDragOver = (event) => {
@@ -2514,14 +2516,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (isSaveShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        void saveConcertLocal();
+        void saveConcertLocal().catch((error) => window.alert(`Save Concert failed: ${error.message}`));
         return;
       }
 
       if (isOpenShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        void openConcertLocal();
+        void openConcertLocal().catch((error) => {
+          if (error?.name !== "AbortError") window.alert(`Open Concert failed: ${error.message}`);
+        });
         return;
       }
 
@@ -3155,6 +3159,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const saveEditor = async () => {
     if (!selectedNode || !editData) return;
+    let nodeName;
+    try {
+      nodeName = validateNodeName(editData.name);
+    } catch (error) {
+      window.alert(error.message);
+      return;
+    }
     const hasChanges = hasEditorChanges(selectedNode, editData);
     let nextEditData = editData;
     if (selectedNode.type === "concert") {
@@ -3189,7 +3200,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
               data: {
                 ...node.data,
                 ...nextEditData,
-                name: safeName(nextEditData.name),
+                name: nodeName,
               },
             }
           : node,
@@ -3294,7 +3305,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     async (node) => {
       const viewer = window.open("", "_blank", "width=1100,height=760,resizable=yes,scrollbars=yes");
       if (!viewer) return;
-      viewer.document.title = `${node.data?.name || node.id} - LP Model`;
+      viewer.document.title = `${node.data.name} - LP Model`;
       viewer.document.body.replaceChildren();
       viewer.document.body.style.margin = "0";
       viewer.document.body.style.background = "#0f172a";
@@ -3450,7 +3461,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return;
     }
 
-    const runConcertName = safeConcertPathName(concertName) || safeName(concertName);
+    const runConcertName = safeConcertPathName(concertName);
     try {
       if (mode !== "selected") {
         await validateCalledConcerts(nodes);
@@ -3515,7 +3526,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const message = `Run failed: ${error.message}`;
       const failedNodes = Object.fromEntries(nextNodes.map((node) => [
         node.id,
-        { id: node.id, name: node.data.label || node.data.name || node.id, status: "error", error: message },
+        { id: node.id, name: node.data.name, status: "error", error: message },
       ]));
       setNodes((currentNodes) => currentNodes.map((node) => ({
         ...node,
@@ -3564,15 +3575,19 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       newConcert: openNewTab,
       closeConcert,
       openConcert: () => {
-        void openConcertLocal();
+        void openConcertLocal().catch((error) => {
+          if (error?.name !== "AbortError") window.alert(`Open Concert failed: ${error.message}`);
+        });
       },
       openServerConcert,
       openDeploymentConcert,
       saveConcert: () => {
-        void saveConcertLocal();
+        void saveConcertLocal().catch((error) => window.alert(`Save Concert failed: ${error.message}`));
       },
       saveConcertAs: () => {
-        void saveConcertAsLocal();
+        void saveConcertAsLocal().catch((error) => {
+          if (error?.name !== "AbortError") window.alert(`Save Concert failed: ${error.message}`);
+        });
       },
       prepareDeployment: async (nextVersion, deploymentName, nextCommitId) => {
         const commitOverrides = { lastCommitId, commitId: nextCommitId };

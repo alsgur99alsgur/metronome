@@ -8,15 +8,10 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import MergeTypeOutlinedIcon from "@mui/icons-material/MergeTypeOutlined";
 import PlaylistAddOutlinedIcon from "@mui/icons-material/PlaylistAddOutlined";
 import SortOutlinedIcon from "@mui/icons-material/SortOutlined";
-
-const safeName = (value) => {
-  const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
-  if (!safe) return "task";
-  return /^\d/.test(safe) ? `task_${safe}` : safe;
-};
+import { validateNodeName } from "./nameValidation";
 
 export const pythonTemplate = (name) =>
-  `def func_${safeName(name)}(inputs):
+  `def func_${validateNodeName(name)}(inputs):
     """
     inputs:
         list[pandas.DataFrame]

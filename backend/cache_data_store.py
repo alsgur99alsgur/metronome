@@ -7,6 +7,8 @@ from threading import Lock
 
 import pandas as pd
 
+from json_serialization import json_default
+
 
 class CacheDataStore:
     def __init__(
@@ -38,7 +40,10 @@ class CacheDataStore:
 
     @staticmethod
     def _safe_name(name):
-        return re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(name or "")).strip("_") or "untitled"
+        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(name or "")).strip("_")
+        if not safe:
+            raise ValueError("Cache path name is required.")
+        return safe
 
     @classmethod
     def _safe_replay_id(cls, name):
@@ -54,7 +59,14 @@ class CacheDataStore:
 
     def _write_metadata(self):
         with open(self.metadata_path, "w", encoding="utf-8") as file:
-            json.dump(self.metadata, file, ensure_ascii=False, allow_nan=True, indent=2)
+            json.dump(
+                self.metadata,
+                file,
+                ensure_ascii=False,
+                allow_nan=True,
+                indent=2,
+                default=json_default,
+            )
 
     def finish(self, status, finished_at=None, timing=None):
         with self.lock:
@@ -137,7 +149,9 @@ class CacheDataStore:
                 if "metadata.json" not in os.listdir(cache_path):
                     continue
                 metadata = cls._load_metadata(cache_path)
-                cache_id = metadata.get("id") or cls._safe_name(replay_id)
+                if not metadata.get("id"):
+                    raise ValueError(f"Cache metadata id is required: {concert_name}/{replay_id}")
+                cache_id = metadata["id"]
                 paths.append((concert_name, cache_id, cache_path, replay_id, metadata))
         return paths
 

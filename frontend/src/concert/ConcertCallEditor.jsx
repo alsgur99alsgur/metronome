@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import ConcertListPanel from "./ConcertListPanel";
 import { variableInputType, variableInputValue } from "./variableTypes";
+import { concertBaseName, validateConcertPath } from "./nameValidation";
 
 const safeName = (value) => {
   const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
@@ -9,16 +10,7 @@ const safeName = (value) => {
   return /^\d/.test(safe) ? `task_${safe}` : safe;
 };
 
-const safeConcertPathName = (value) => {
-  const parts = String(value || "")
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((part) => safeName(part))
-    .filter(Boolean);
-  return parts.join("/");
-};
-
-const concertBaseName = (value) => safeName(String(value || "").replace(/\\/g, "/").split("/").pop());
+const safeConcertPathName = validateConcertPath;
 
 const encodeConcertPath = (value) =>
   String(value || "")
@@ -138,11 +130,13 @@ export default function ConcertCallEditor({
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const loadConcertInputsByName = async (concertName, concertId = "") => {
-    const nextConcertName = safeConcertPathName(concertName || "");
-    if (!nextConcertName) {
+    let nextConcertName;
+    try {
+      nextConcertName = safeConcertPathName(concertName);
+    } catch (error) {
       setEditData((current) => ({
         ...current,
-        concertLoadError: "Concert name is required.",
+        concertLoadError: error.message,
       }));
       return;
     }
