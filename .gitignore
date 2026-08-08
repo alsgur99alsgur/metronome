@@ -5,6 +5,13 @@ __pycache__/
 
 frontend/node_modules/
 frontend/dist/
+frontend/release/
+frontend/backend-dist/
+frontend/node_modules/
+
+backend/build/
+backend/dist/
+backend/.venv-build/
 
 *.zip
 

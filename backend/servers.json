@@ -5,8 +5,8 @@
     "port": 8000
   },
     {
-    "name": "Local2",
-    "host": "127.0.0.1",
-    "port": 8001
+    "name": "Windows Server",
+    "host": "210.103.123.188",
+    "port": 8000
   }
 ]

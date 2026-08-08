@@ -10,7 +10,10 @@ import pandas as pd
 from app_config import config_int
 
 
-BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
+BACKEND_ROOT = os.environ.get(
+    "METRONOME_DATA_DIR",
+    os.path.dirname(os.path.abspath(__file__)),
+)
 CONNECTIONS_PATH = os.path.join(BACKEND_ROOT, "connections.json")
 SCHEMA_CACHE_PATH = os.path.join(BACKEND_ROOT, "connection_schema_cache.json")
 ORACLE_POOL_MIN = config_int("oracle", "poolMin")

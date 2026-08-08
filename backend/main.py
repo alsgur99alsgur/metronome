@@ -34,7 +34,10 @@ from schema_inference import infer_concert_columns
 from timer_manager import TimerManager
 from variable_types import runtime_params as _typed_runtime_params
 
-BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
+BACKEND_ROOT = os.environ.get(
+    "METRONOME_DATA_DIR",
+    os.path.dirname(os.path.abspath(__file__)),
+)
 REPLAY_ROOT = os.path.join(BACKEND_ROOT, "replay")
 PLAYING_ROOT = os.path.join(BACKEND_ROOT, "playings")
 STAGE_ROOT = os.path.join(BACKEND_ROOT, "stage")
@@ -279,6 +282,7 @@ app = FastAPI(default_response_class=AllowNaNJSONResponse)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "null",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
@@ -553,9 +557,10 @@ def _run_in_background(
 
 @app.get("/servers")
 def list_servers():
+    servers = server_manager.list()
     return {
-        "servers": server_manager.list(),
-        "defaultServerName": server_manager.primary["name"],
+        "servers": servers,
+        "defaultServerName": servers[0]["name"],
     }
 
 

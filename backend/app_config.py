@@ -3,7 +3,11 @@ import os
 from functools import lru_cache
 
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+BACKEND_ROOT = os.environ.get(
+    "METRONOME_DATA_DIR",
+    os.path.dirname(os.path.abspath(__file__)),
+)
+CONFIG_PATH = os.path.join(BACKEND_ROOT, "config.json")
 
 DEFAULT_CONFIG = {
     "oracle": {
