@@ -86,7 +86,7 @@ export function ConcertDirectoryTree({ directories, directory, onChange, counts 
 
 export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directoryValue, onDirectoryChange, onDirectoriesChange, onOpen, openKinds, onClose, onSelect, selectedKey, onPromote, onRollback, onMove, canMove, onDelete, onDataChange, busy, refreshKey = 0 }) {
   const [directories, setDirectories] = useState([]);
-  const [deployments, setDeployments] = useState({ concerts: [], rehearsals: [], backups: [] });
+  const [deployments, setDeployments] = useState({ playings: [], rehearsals: [], backups: [] });
   const [directory, setDirectory] = useState("");
   const [source, setSource] = useState(fixedSource || "all");
   const [error, setError] = useState("");
@@ -106,7 +106,7 @@ export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directo
       setDirectories(directoryBody.directories || []);
       onDirectoriesChange?.(directoryBody.directories || []);
       setDeployments({
-        concerts: deploymentBody.concerts || [],
+        playings: deploymentBody.playings || [],
         rehearsals: deploymentBody.rehearsals || [],
         backups: deploymentBody.backups || [],
       });
@@ -118,7 +118,7 @@ export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directo
   }, [apiBaseUrl, refreshKey, onDataChange]);
 
   const concerts = source === "all"
-    ? [...deployments.concerts, ...deployments.rehearsals, ...deployments.backups]
+    ? [...deployments.playings, ...deployments.rehearsals, ...deployments.backups]
     : deployments[source] || [];
   const directoryCounts = concerts.reduce((counts, item) => {
     const folder = item.name.includes("/") ? item.name.slice(0, item.name.lastIndexOf("/")) : "";
@@ -133,7 +133,7 @@ export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directo
         {!fixedSource && (
           <select value={source} onChange={(event) => setSource(event.target.value)}>
             <option value="all">All</option>
-            <option value="concerts">Concerts</option>
+            <option value="playings">Playings</option>
             <option value="rehearsals">Rehearsals</option>
             <option value="backups">Backups</option>
           </select>

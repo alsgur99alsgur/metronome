@@ -32,10 +32,11 @@ from resource_store import ResourceStore
 from server_manager import ServerManager
 from schema_inference import infer_concert_columns
 from timer_manager import TimerManager
+from variable_types import runtime_params as _typed_runtime_params
 
 BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
 REPLAY_ROOT = os.path.join(BACKEND_ROOT, "replay")
-CONCERT_ROOT = os.path.join(BACKEND_ROOT, "concerts")
+PLAYING_ROOT = os.path.join(BACKEND_ROOT, "playings")
 STAGE_ROOT = os.path.join(BACKEND_ROOT, "stage")
 TMP_ROOT = os.path.join(BACKEND_ROOT, "tmp")
 SERVERS_PATH = os.path.join(BACKEND_ROOT, "servers.json")
@@ -55,6 +56,8 @@ class AllowNaNJSONResponse(JSONResponse):
 
 class ConcertSaveRequest(BaseModel):
     concertId: str
+    lastCommitId: Optional[str] = None
+    commitId: Optional[str] = None
     version: str
     name: str
     nodes: list
@@ -140,6 +143,8 @@ class StageResourceRequest(BaseModel):
 
 class DeploymentRequest(BaseModel):
     concertId: str
+    lastCommitId: Optional[str] = None
+    commitId: str
     sourceName: str
     deploymentPath: str
     allowMismatch: bool = False
@@ -198,26 +203,7 @@ def _variable_name(item):
 
 
 def _runtime_params(global_variables=None, input_variables=None, params=None):
-    result = {}
-    for item in global_variables or []:
-        if not isinstance(item, dict):
-            continue
-        name = _variable_name(item)
-        if name:
-            result[name] = item.get("value")
-
-    for item in input_variables or []:
-        if not isinstance(item, dict):
-            continue
-        name = _variable_name(item)
-        if name:
-            result[name] = item.get("defaultValue")
-
-    for key, value in (params or {}).items():
-        name = str(key)[1:] if str(key).startswith("$") else str(key)
-        result[name] = value
-
-    return result
+    return _typed_runtime_params(global_variables, input_variables, params)
 
 
 def _resolve_connection(connection, params):
@@ -306,7 +292,7 @@ app.add_middleware(
 runs = {}
 runs_lock = Lock()
 executors = {}
-concert_store = ConcertStore(CONCERT_ROOT)
+concert_store = ConcertStore(PLAYING_ROOT)
 deployment_store = DeploymentStore(BACKEND_ROOT)
 resource_store = ResourceStore(STAGE_ROOT, TMP_ROOT)
 server_manager = ServerManager(SERVERS_PATH)
@@ -573,32 +559,34 @@ def list_servers():
     }
 
 
-@app.get("/concerts")
-def list_concerts():
-    return {"concerts": concert_store.list()}
+@app.get("/playings")
+def list_playings():
+    return {"playings": concert_store.list()}
 
 
-@app.get("/concerts/{concert_name:path}")
-def get_concert(concert_name: str):
+@app.get("/playings/{concert_name:path}")
+def get_playing(concert_name: str):
     try:
         return concert_store.load(concert_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get("/concerts-by-id/{concert_id}")
-def get_concert_by_id(concert_id: str):
+@app.get("/playings-by-id/{concert_id}")
+def get_playing_by_id(concert_id: str):
     try:
         return concert_store.load_by_id(concert_id)
     except (ValueError, FileNotFoundError) as exc:
         raise _deployment_error(exc) from exc
 
 
-@app.post("/concerts")
-def save_concert(req: ConcertSaveRequest):
+@app.post("/playings")
+def save_playing(req: ConcertSaveRequest):
     try:
         return concert_store.save(
             req.concertId,
+            req.lastCommitId,
+            req.commitId,
             req.name,
             req.nodes,
             req.edges,
@@ -623,6 +611,8 @@ def _deployment_error(exc):
 def _deployment_payload(req):
     return {
         "concertId": req.concertId,
+        "lastCommitId": req.lastCommitId,
+        "commitId": req.commitId,
         "version": req.version,
         "name": req.name,
         "nodes": req.nodes,
@@ -934,7 +924,7 @@ def _queue_run(
         build_nodes,
         build_edges,
         params=params,
-        concert_root=CONCERT_ROOT,
+        concert_root=PLAYING_ROOT,
         replay_root=REPLAY_ROOT,
         call_stack=[concert_name],
         call_ids=[concert_id],

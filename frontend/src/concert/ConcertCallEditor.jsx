@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import ConcertListPanel from "./ConcertListPanel";
+import { variableInputType, variableInputValue } from "./variableTypes";
 
 const safeName = (value) => {
   const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
@@ -100,6 +101,17 @@ function OutputColumnsPanel({ outputColumns = [], outputMessage }) {
 }
 
 function ConcertPickerDialog({ apiBaseUrl, onSelect, onClose }) {
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onClose]);
+
   return (
     <div className="concert-picker-backdrop" onClick={onClose}>
       <section className="concert-picker" onClick={(event) => event.stopPropagation()}>
@@ -109,7 +121,7 @@ function ConcertPickerDialog({ apiBaseUrl, onSelect, onClose }) {
             x
           </button>
         </div>
-        <ConcertListPanel apiBaseUrl={apiBaseUrl} fixedSource="concerts" onOpen={onSelect} />
+        <ConcertListPanel apiBaseUrl={apiBaseUrl} fixedSource="playings" onOpen={onSelect} />
       </section>
     </div>
   );
@@ -136,8 +148,8 @@ export default function ConcertCallEditor({
     }
 
     const response = await fetch(concertId
-      ? `${apiBaseUrl}/concerts-by-id/${encodeURIComponent(concertId)}`
-      : `${apiBaseUrl}/concerts/${encodeConcertPath(nextConcertName)}`);
+      ? `${apiBaseUrl}/playings-by-id/${encodeURIComponent(concertId)}`
+      : `${apiBaseUrl}/playings/${encodeConcertPath(nextConcertName)}`);
     if (!response.ok) {
       setEditData((current) => ({
         ...current,
@@ -213,7 +225,9 @@ export default function ConcertCallEditor({
                   <label className="field-label">{normalizeVariableName(item.name)}</label>
                   <input
                     className="text-input"
-                    value={editData.inputParamValues?.[key] ?? ""}
+                    type={variableInputType(item.type)}
+                    step={item.type === "datetime" ? "1" : undefined}
+                    value={variableInputValue(editData.inputParamValues?.[key], item.type)}
                     placeholder={String(item.defaultValue ?? "")}
                     onChange={(event) =>
                       setEditData((current) => ({

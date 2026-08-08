@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ConcertFileTable, folderOf } from "./ConcertFileTable";
 import { ConcertDirectoryTree, ConcertFolderCreate } from "./ConcertListPanel";
@@ -8,18 +8,24 @@ const versionPattern = /^[A-Za-z0-9.-]+$/;
 export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy, onDirectoryCreated, onClose }) {
   const [version, setVersion] = useState("");
   const [directories, setDirectories] = useState([]);
-  const [concerts, setConcerts] = useState([]);
-  const [productionDirectory, setProductionDirectory] = useState(null);
+  const [deployments, setDeployments] = useState([]);
+  const [lockedDirectory, setLockedDirectory] = useState(null);
+  const [hasRehearsal, setHasRehearsal] = useState(false);
   const [directory, setDirectory] = useState(folderOf(sourceName));
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [notice, setNotice] = useState("");
+  const attemptCommitId = useRef(null);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Escape" || busy) return;
       event.preventDefault();
+      if (notice) {
+        setNotice("");
+        return;
+      }
       if (warning) {
         setWarning("");
         return;
@@ -28,7 +34,7 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onClose, warning]);
+  }, [busy, notice, onClose, warning]);
 
   const loadDirectories = async (preferredDirectory = directory) => {
     const [directoryResponse, deploymentResponse] = await Promise.all([
@@ -43,27 +49,43 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
     if (!deploymentResponse.ok) throw new Error(deploymentBody?.detail || `Load deployments failed (${deploymentResponse.status}).`);
     const nextDirectories = directoryBody.directories || [];
     const baseName = sourceName.split("/").pop();
-    const production = (deploymentBody.concerts || []).find((item) => item.name.split("/").pop() === baseName);
-    const lockedDirectory = production ? folderOf(production.name) : null;
+    const allDeployments = [
+      ...(deploymentBody.playings || []),
+      ...(deploymentBody.rehearsals || []),
+      ...(deploymentBody.backups || []),
+    ];
+    const rehearsalExists = (deploymentBody.rehearsals || []).some(
+      (item) => item.name.split("/").pop() === baseName,
+    );
+    const sameName = allDeployments.find((item) => item.name.split("/").pop() === baseName);
+    const nextLockedDirectory = sameName ? folderOf(sameName.name) : null;
     setDirectories(nextDirectories);
-    setConcerts(deploymentBody.concerts || []);
-    setProductionDirectory(lockedDirectory);
-    setDirectory(lockedDirectory ?? (nextDirectories.includes(preferredDirectory) ? preferredDirectory : ""));
+    setDeployments(allDeployments);
+    setLockedDirectory(nextLockedDirectory);
+    setHasRehearsal(rehearsalExists);
+    setDirectory(nextLockedDirectory ?? (nextDirectories.includes(preferredDirectory) ? preferredDirectory : ""));
   };
 
   useEffect(() => { loadDirectories().catch((nextError) => setError(nextError.message)); }, []);
 
   const deploy = async (allowMismatch = false) => {
-    if (!versionPattern.test(version)) {
+    if (hasRehearsal) return;
+    const nextVersion = version.trim();
+    if (!nextVersion) {
+      setNotice("Version is required.");
+      return;
+    }
+    if (!versionPattern.test(nextVersion)) {
       setError("Version may contain only letters, numbers, '.', and '-'.");
       return;
     }
     setBusy(true);
     setError("");
-    setMessage("");
     try {
-      const result = await onDeploy(version, directory, allowMismatch);
-      setMessage(`Rehearsal created on ${result.servers?.join(", ") || target}.`);
+      if (!attemptCommitId.current) attemptCommitId.current = crypto.randomUUID();
+      await onDeploy(nextVersion, directory, allowMismatch, attemptCommitId.current);
+      attemptCommitId.current = null;
+      onClose();
     } catch (nextError) {
       if (nextError?.name === "AbortError") return;
       if (nextError?.retryableMismatch && !allowMismatch) {
@@ -89,10 +111,10 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
               directories={directories}
               directory={directory}
               onChange={setDirectory}
-              isDisabled={(item) => productionDirectory !== null && productionDirectory !== item}
+              isDisabled={(item) => lockedDirectory !== null && lockedDirectory !== item}
             />
             <div className="concert-list-files">
-              <ConcertFileTable concerts={concerts} directory={directory} />
+              <ConcertFileTable concerts={deployments} directory={directory} />
             </div>
           </div>
         </div>
@@ -114,11 +136,10 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
             <input autoFocus value={version} onChange={(event) => setVersion(event.target.value)} />
           </label>
           {error && <div className="dialog-error">{error}</div>}
-          {message && <div className="deploy-success">{message}</div>}
         </div>
         <div className="save-dialog-actions">
           <button disabled={busy} onClick={onClose}>Cancel</button>
-          <button className="primary-button" disabled={busy || Boolean(message)} onClick={() => deploy(false)}>{busy ? "Creating Rehearsal..." : "Rehearsal"}</button>
+          <button className="primary-button" disabled={busy || hasRehearsal} onClick={() => deploy(false)}>{busy ? "Creating Rehearsal..." : "Rehearsal"}</button>
         </div>
       </section>
       {warning && (
@@ -130,6 +151,17 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
             <div className="save-dialog-actions">
               <button onClick={() => setWarning("")}>No</button>
               <button className="warning-button" onClick={() => { setWarning(""); void deploy(true); }}>Yes</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {notice && (
+        <div className="modal-backdrop" onClick={(event) => { event.stopPropagation(); setNotice(""); }}>
+          <section className="save-dialog rehearsal-warning-dialog" role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <h3>Rehearsal</h3>
+            <p>{notice}</p>
+            <div className="save-dialog-actions">
+              <button className="primary-button" onClick={() => setNotice("")}>OK</button>
             </div>
           </section>
         </div>

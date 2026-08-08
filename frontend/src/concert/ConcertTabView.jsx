@@ -41,6 +41,7 @@ import RunParamsDialog from "./RunParamsDialog";
 import RunningDialog from "./RunningDialog";
 import SaveChangesDialog from "./SaveChangesDialog";
 import VariablesDialog from "./VariablesDialog";
+import { coerceVariableValue } from "./variableTypes";
 import { nodeIcon, nodeStyle } from "./Node";
 import { nodeTypes } from "./nodeTypes";
 
@@ -184,6 +185,8 @@ const concertBaseName = (value) => safeName(String(value || "").replace(/\\/g, "
 const createBlankTab = () => ({
   id: makeId(),
   concertId: crypto.randomUUID(),
+  lastCommitId: null,
+  commitId: null,
   concertName: "untitled_concert",
   concertFileLabel: "untitled_concert",
   concertFileHandle: null,
@@ -484,16 +487,6 @@ const normalizeVariableName = (value) => {
   return name ? `$${safeName(name)}` : "$var";
 };
 
-const parseVariableValue = (value) => {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  try {
-    return JSON.parse(text);
-  } catch {
-    return value;
-  }
-};
-
 const stringifyParamValue = (value) => {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -510,8 +503,22 @@ const variablePayload = (variables, valueKey = "value") =>
     .map((item) => ({
       ...item,
       name: normalizeVariableName(item.name),
-      [valueKey]: parseVariableValue(item[valueKey]),
+      [valueKey]: coerceVariableValue(item[valueKey], item.type, normalizeVariableName(item.name)),
     }));
+
+const typedParamPayload = (values, inputVariables) => {
+  const definitions = new Map(
+    (inputVariables || []).map((item) => [normalizeVariableName(item.name).replace(/^\$+/, ""), item]),
+  );
+  return Object.fromEntries(
+    Object.entries(values || {}).map(([key, value]) => {
+      const normalizedKey = key.replace(/^\$+/, "");
+      const definition = definitions.get(normalizedKey);
+      if (!definition) throw new Error(`Input variable definition not found: $${normalizedKey}`);
+      return [key, coerceVariableValue(value, definition.type, `$${normalizedKey}`)];
+    }),
+  );
+};
 
 const variableInputDefaults = (inputVariables) =>
   Object.fromEntries(
@@ -1333,6 +1340,7 @@ function RunCompleteDialog({ timing, onClose }) {
 const ConcertTabView = forwardRef(function ConcertTabView(
   {
     onConcertFileLabelChange = () => {},
+    onActiveConcertChange = () => {},
     defaultServerName = "Local",
     defaultApiBaseUrl = "http://localhost:8000",
     servers = [],
@@ -1343,13 +1351,15 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const initialTabRef = useRef(createBlankTab());
   const [nodes, setNodes] = useNodesState(initialNodes);
   const [edges, setEdges] = useEdgesState(initialEdges);
-  const [isTabOpen, setIsTabOpen] = useState(true);
-  const [tabs, setTabs] = useState([initialTabRef.current]);
+  const [isTabOpen, setIsTabOpen] = useState(false);
+  const [tabs, setTabs] = useState([]);
   const tabsRef = useRef(tabs);
   const openingServerConcertsRef = useRef(new Map());
   tabsRef.current = tabs;
-  const [activeTabId, setActiveTabId] = useState(initialTabRef.current.id);
+  const [activeTabId, setActiveTabId] = useState(null);
   const [concertId, setConcertId] = useState(initialTabRef.current.concertId);
+  const [lastCommitId, setLastCommitId] = useState(initialTabRef.current.lastCommitId);
+  const [commitId, setCommitId] = useState(initialTabRef.current.commitId);
   const [concertName, setConcertName] = useState("untitled_concert");
   const [concertFileLabel, setConcertFileLabel] = useState("untitled_concert");
   const [concertFileHandle, setConcertFileHandle] = useState(null);
@@ -1436,6 +1446,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     () => ({
       id: activeTabId || makeId(),
       concertId,
+      lastCommitId,
+      commitId,
       concertName,
       concertFileLabel,
       concertFileHandle,
@@ -1469,6 +1481,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       concertFileLabel,
       concertName,
       concertId,
+      lastCommitId,
+      commitId,
       version,
       edges,
       globalVariables,
@@ -1494,6 +1508,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     (tab) => {
       setIsTabOpen(true);
       setConcertId(tab.concertId);
+      setLastCommitId(tab.lastCommitId);
+      setCommitId(tab.commitId);
       setConcertName(tab.concertName);
       setConcertFileLabel(tab.concertFileLabel);
       setConcertFileHandle(tab.concertFileHandle || null);
@@ -1749,6 +1765,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     onConcertFileLabelChange(concertFileLabel);
   }, [concertFileLabel, onConcertFileLabelChange]);
 
+  useEffect(() => {
+    onActiveConcertChange(isTabOpen);
+  }, [isTabOpen, onActiveConcertChange]);
+
 
   const concertPayload = useCallback(
     (nameOverride = null, versionOverride = null) => {
@@ -1757,6 +1777,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         safeName(nameOverride || concertName);
       return {
         concertId,
+        lastCommitId,
+        commitId,
         version: versionOverride ?? version,
         name: nextName,
         globalVariables: variablePayload(globalVariables),
@@ -1765,7 +1787,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         edges: edges.map(cleanEdgeForSave),
       };
     },
-    [concertId, concertName, edges, globalVariables, inputVariables, nodes, version],
+    [commitId, concertId, concertName, edges, globalVariables, inputVariables, lastCommitId, nodes, version],
   );
 
   const createTabFromConcertPayload = useCallback(
@@ -1776,6 +1798,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (typeof payload.version !== "string") {
         throw new Error("Concert version must be a string.");
       }
+      if (!Object.hasOwn(payload, "lastCommitId") || !Object.hasOwn(payload, "commitId")) {
+        throw new Error("Concert requires lastCommitId and commitId fields.");
+      }
       const fallbackSafeName = concertBaseName(fallbackName);
       const payloadName = concertBaseName(payload.name || "");
       const nextName =
@@ -1785,6 +1810,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return {
         ...createBlankTab(),
         concertId: payload.concertId,
+        lastCommitId: payload.lastCommitId,
+        commitId: payload.commitId,
         concertName: nextName,
         concertFileLabel: fileLabel || nextName,
         concertFileHandle: fileHandle,
@@ -1837,16 +1864,22 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     ],
   );
 
-  const writeConcertFile = async (handle, nameOverride = null, versionOverride = null) => {
+  const writeConcertFile = async (handle, nameOverride = null, versionOverride = null, commitOverrides = null) => {
     const writable = await handle.createWritable();
-    await writable.write(JSON.stringify(concertPayload(nameOverride, versionOverride), null, 2));
+    const payload = {
+      ...concertPayload(nameOverride, versionOverride),
+      ...(commitOverrides || {}),
+    };
+    await writable.write(JSON.stringify(payload, null, 2));
     await writable.close();
     if (versionOverride != null) setVersion(versionOverride);
+    if (commitOverrides && Object.hasOwn(commitOverrides, "lastCommitId")) setLastCommitId(commitOverrides.lastCommitId);
+    if (commitOverrides && Object.hasOwn(commitOverrides, "commitId")) setCommitId(commitOverrides.commitId);
     setIsDirty(false);
   };
 
   const postConcertPayload = async (payload) => {
-    const response = await fetch(`${apiBaseUrl}/concerts`, {
+    const response = await fetch(`${apiBaseUrl}/playings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -1926,7 +1959,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     ];
 
     for (const targetConcertId of concertIds) {
-      const response = await fetch(`${apiBaseUrl}/concerts-by-id/${encodeURIComponent(targetConcertId)}`);
+      const response = await fetch(`${apiBaseUrl}/playings-by-id/${encodeURIComponent(targetConcertId)}`);
       if (response.ok) continue;
       if (response.status === 404) {
         throw new Error(`Called Concert not found in backend: ${targetConcertId}`);
@@ -1939,7 +1972,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     await postConcertPayload(concertPayload(name || concertName));
   };
 
-  const saveConcertAsLocal = async (versionOverride = null, deploymentName = null) => {
+  const saveConcertAsLocal = async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
     if (!isTabOpen) return safeName(concertName);
     const fileName = `${safeName(concertName)}.concert`;
     if ("showSaveFilePicker" in window) {
@@ -1954,7 +1987,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       });
       const nextName = getFileNameBase(handle.name);
       const payloadName = deploymentName || nextName;
-      await writeConcertFile(handle, payloadName, versionOverride);
+      await writeConcertFile(handle, payloadName, versionOverride, commitOverrides);
       setConcertFileHandle(handle);
       setIsTabOpen(true);
       setConcertName(nextName);
@@ -1964,7 +1997,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
 
     const nextName = deploymentName || safeConcertPathName(concertName) || safeName(concertName);
-    const blob = new Blob([JSON.stringify(concertPayload(nextName, versionOverride), null, 2)], {
+    const payload = { ...concertPayload(nextName, versionOverride), ...(commitOverrides || {}) };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -1975,20 +2009,22 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     URL.revokeObjectURL(url);
     setConcertFileLabel(fileName);
     if (versionOverride != null) setVersion(versionOverride);
+    if (commitOverrides && Object.hasOwn(commitOverrides, "lastCommitId")) setLastCommitId(commitOverrides.lastCommitId);
+    if (commitOverrides && Object.hasOwn(commitOverrides, "commitId")) setCommitId(commitOverrides.commitId);
     setIsDirty(false);
     return nextName;
   };
 
-  const saveConcertLocal = async (versionOverride = null, deploymentName = null) => {
+  const saveConcertLocal = async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
     if (!isTabOpen) return safeName(concertName);
     if (concertFileHandle && "createWritable" in concertFileHandle) {
       const nextName = getFileNameBase(concertFileHandle.name || concertName);
       const payloadName = deploymentName || nextName;
-      await writeConcertFile(concertFileHandle, payloadName, versionOverride);
+      await writeConcertFile(concertFileHandle, payloadName, versionOverride, commitOverrides);
       setConcertName(nextName);
       return payloadName;
     }
-    return saveConcertAsLocal(versionOverride, deploymentName);
+    return saveConcertAsLocal(versionOverride, deploymentName, commitOverrides);
   };
 
   const openConcertLocal = async () => {
@@ -2019,8 +2055,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       setOpeningConcertName(concertBaseName(name));
       const path = name.split("/").map(encodeURIComponent).join("/");
       const response = await fetch(concertIdOverride
-        ? `${apiBaseUrl}/concerts-by-id/${encodeURIComponent(concertIdOverride)}`
-        : `${apiBaseUrl}/concerts/${path}`);
+        ? `${apiBaseUrl}/playings-by-id/${encodeURIComponent(concertIdOverride)}`
+        : `${apiBaseUrl}/playings/${path}`);
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
       const payload = await inferConcertPayloadColumns(await response.json());
       openConcertPayloadInTab(payload, { fallbackName: name, fileLabel: name.split("/").pop() });
@@ -2035,7 +2071,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [apiBaseUrl, inferConcertPayloadColumns, openConcertPayloadInTab]);
 
   const openDeploymentConcert = useCallback(async (item) => {
-    if (item.kind === "concert") return openServerConcert(item.name, item.concertId);
+    if (item.kind === "playing") return openServerConcert(item.name, item.concertId);
     const key = `${item.kind}:${item.path}`;
     const pending = openingServerConcertsRef.current.get(key);
     if (pending) return pending;
@@ -2072,44 +2108,26 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const handleConcertFileDragOver = (event) => {
     if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = "none";
   };
 
-  const handleConcertFileDrop = async (event) => {
-    const file = event.dataTransfer?.files?.[0];
-    if (!file) return;
+  const handleConcertFileDrop = (event) => {
+    if (!event.dataTransfer?.files?.length) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!file.name.toLowerCase().endsWith(".concert")) {
-      setRun({
-        status: "error",
-        nodes: {},
-        error: "Only .concert files can be opened.",
-      });
-      return;
-    }
-    try {
-      const payload = await inferConcertPayloadColumns(
-        JSON.parse(await file.text()),
-      );
-      openConcertPayloadInTab(payload, {
-        fallbackName: getFileNameBase(file.name),
-        fileHandle: null,
-        fileLabel: getFileNameBase(file.name),
-      });
-    } catch (error) {
-      setRun({
-        status: "error",
-        nodes: {},
-        error: `Open dropped Concert failed: ${error.message}`,
-      });
-    }
+    setRun({
+      status: "error",
+      nodes: {},
+      error: "Drag-and-drop file opening is disabled. Use File > Open.",
+    });
   };
 
   const resetConcert = useCallback(
     (name = "untitled_concert") => {
       setIsTabOpen(true);
       setConcertId(crypto.randomUUID());
+      setLastCommitId(null);
+      setCommitId(null);
       setConcertName(concertBaseName(name));
       setConcertFileLabel(concertBaseName(name));
       setConcertFileHandle(null);
@@ -2574,6 +2592,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       }
 
       if (event.key === "Escape") {
+        if (document.querySelector(".concert-picker")) {
+          return;
+        }
         if (document.querySelector(".deploy-dialog")) {
           return;
         }
@@ -3137,7 +3158,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         concertLoadError: undefined,
         inputParams: Object.fromEntries(
           Object.entries(editData.inputParamValues || {}).map(
-            ([key, value]) => [key, parseVariableValue(value)],
+            ([key, value]) => {
+              const definition = (editData.calledConcertInputVariables || []).find(
+                (item) => normalizeVariableName(item.name).replace(/^\$+/, "") === key.replace(/^\$+/, ""),
+              );
+              if (!definition) throw new Error(`Input variable definition not found: $${key.replace(/^\$+/, "")}`);
+              return [key, coerceVariableValue(value, definition.type, `$${key.replace(/^\$+/, "")}`)];
+            },
           ),
         ),
       };
@@ -3468,12 +3495,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           edges: nextEdges,
           globalVariables: variablePayload(globalVariables),
           inputVariables: variablePayload(inputVariables, "defaultValue"),
-          params: Object.fromEntries(
-            Object.entries(inputParams || {}).map(([key, value]) => [
-              key,
-              parseVariableValue(value),
-            ]),
-          ),
+          params: typedParamPayload(inputParams, inputVariables),
           mode,
           selected: selectedNode?.id,
           replay,
@@ -3525,12 +3547,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     if (!pendingRun) return;
     const nextValues = hydrateRunParamValues(inputVariables, draftValues);
     setRunParamValues(nextValues);
-    const params = Object.fromEntries(
-      Object.entries(nextValues).map(([key, value]) => [
-        key,
-        parseVariableValue(value),
-      ]),
-    );
+    const params = typedParamPayload(nextValues, inputVariables);
     const nextRun = pendingRun;
     setPendingRun(null);
     void runConcert(nextRun.mode, nextRun.replay, params, true);
@@ -3552,23 +3569,30 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       saveConcertAs: () => {
         void saveConcertAsLocal();
       },
-      prepareDeployment: async (nextVersion, deploymentName) => {
-        await saveConcertLocal(nextVersion);
-        return concertPayload(concertBaseName(deploymentName), nextVersion);
+      prepareDeployment: async (nextVersion, deploymentName, nextCommitId) => {
+        const commitOverrides = { lastCommitId, commitId: nextCommitId };
+        return {
+          ...concertPayload(concertBaseName(deploymentName), nextVersion),
+          ...commitOverrides,
+        };
       },
-      activeConcertName: () => concertName,
+      completeDeployment: async (nextVersion, nextCommitId) => {
+        await saveConcertLocal(nextVersion, null, {
+          lastCommitId: nextCommitId,
+          commitId: nextCommitId,
+        });
+      },
+      activeConcertName: () => isTabOpen ? concertName : "",
       hasActiveConcert: () => isTabOpen,
     }),
-    [closeConcert, concertName, concertPayload, isTabOpen, openConcertLocal, openDeploymentConcert, openNewTab, openServerConcert, saveConcertAsLocal, saveConcertLocal],
+    [closeConcert, concertName, concertPayload, isTabOpen, lastCommitId, openConcertLocal, openDeploymentConcert, openNewTab, openServerConcert, saveConcertAsLocal, saveConcertLocal],
   );
 
   return (
     <div
       className="concert-tab-view"
       onDragOver={handleConcertFileDragOver}
-      onDrop={(event) => {
-        void handleConcertFileDrop(event);
-      }}
+      onDrop={handleConcertFileDrop}
       onClick={() => {
         setContextMenu(null);
         setActiveSubMenu(null);
@@ -3616,9 +3640,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
               </span>
             </button>
           ))}
-          <button className="tab-new-button" title="New" onClick={openNewTab}>
-            +
-          </button>
         </div>
 
         {isTabOpen ? (

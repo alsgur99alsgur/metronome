@@ -7,11 +7,39 @@ const responseError = async (response) => {
   return typeof body?.detail === "string" ? body.detail : `Request failed (${response.status}).`;
 };
 
+function MessageDialog({ type, message, onClose }) {
+  if (!message) return null;
+  const isError = type === "error";
+
+  return (
+    <div className="dialog-backdrop message-dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className={`dialog message-dialog ${isError ? "error" : "success"}`}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="message-dialog-title"
+        aria-describedby="message-dialog-body"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialog-titlebar">
+          <h2 id="message-dialog-title">{isError ? "Error" : "Success"}</h2>
+          <button className="icon-button" type="button" aria-label="Close message" onClick={onClose}>×</button>
+        </div>
+        <div className="dialog-body" id="message-dialog-body">{message}</div>
+        <div className="dialog-actions">
+          <button className="primary-button" type="button" autoFocus onClick={onClose}>OK</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ServerOpenDialog({ onClose, onOpen }) {
   const [servers, setServers] = useState([]);
   const [selectedName, setSelectedName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     fetch(`${ADMIN_API_BASE_URL}/servers`)
@@ -29,6 +57,25 @@ function ServerOpenDialog({ onClose, onOpen }) {
   }, []);
 
   const selectedServer = servers.find((server) => server.name === selectedName);
+  const openSelectedServer = async () => {
+    if (!selectedServer || opening) return;
+    setOpening(true);
+    setError("");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`http://${selectedServer.host}:${selectedServer.port}/health`, { signal: controller.signal });
+      if (!response.ok) throw new Error(await responseError(response));
+      onOpen(selectedServer);
+    } catch (openError) {
+      setError(openError.name === "AbortError"
+        ? `No response from ${selectedServer.name}.`
+        : `Unable to connect to ${selectedServer.name}: ${openError.message}`);
+    } finally {
+      window.clearTimeout(timeoutId);
+      setOpening(false);
+    }
+  };
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
@@ -41,19 +88,18 @@ function ServerOpenDialog({ onClose, onOpen }) {
           {loading && <div className="dialog-message">Loading servers…</div>}
           {error && <div className="error-message">{error}</div>}
           {!loading && !error && servers.length === 0 && <div className="dialog-message">No servers are configured.</div>}
-          {servers.map((server) => (
-            <label className={`server-option${selectedName === server.name ? " selected" : ""}`} key={server.name}>
-              <input type="radio" name="server" value={server.name} checked={selectedName === server.name} onChange={() => setSelectedName(server.name)} />
-              <span className="server-option-copy">
-                <strong>{server.name}</strong>
-                <span>{server.host}:{server.port}</span>
-              </span>
+          {!loading && servers.length > 0 && (
+            <label className="server-select-field">
+              <span>Server</span>
+              <select value={selectedName} disabled={opening} onChange={(event) => { setSelectedName(event.target.value); setError(""); }}>
+                {servers.map((server) => <option value={server.name} key={server.name}>{server.name} ({server.host}:{server.port})</option>)}
+              </select>
             </label>
-          ))}
+          )}
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary-button" type="button" disabled={!selectedServer} onClick={() => onOpen(selectedServer)}>Open</button>
+          <button type="button" disabled={opening} onClick={onClose}>Cancel</button>
+          <button className="primary-button" type="button" disabled={!selectedServer || opening} onClick={openSelectedServer}>{opening ? "Opening…" : "Open"}</button>
         </div>
       </section>
     </div>
@@ -63,6 +109,27 @@ function ServerOpenDialog({ onClose, onOpen }) {
 const intervalUnits = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
 const inputVariableKey = (item) => String(item?.name || "").trim().replace(/^\$+/, "");
 const displayValue = (value) => value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
+const variableInputType = (type) => type === "number" ? "number" : type === "datetime" ? "datetime-local" : "text";
+const variableInputValue = (value, type) => {
+  if (value == null || type !== "datetime") return displayValue(value);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+};
+const coerceVariableValue = (value, type, name) => {
+  if (!["string", "number", "datetime"].includes(type)) throw new Error(`${name} must have a type.`);
+  if (type === "string") return String(value ?? "");
+  if (type === "number") {
+    if (String(value ?? "").trim() === "") throw new Error(`${name} requires a number.`);
+    const number = Number(value);
+    if (!Number.isFinite(number)) throw new Error(`${name} requires a valid number.`);
+    return number;
+  }
+  if (String(value ?? "").trim() === "") throw new Error(`${name} requires a datetime.`);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`${name} requires a valid datetime.`);
+  return date.toISOString();
+};
 const toLocalDateTime = (value) => {
   const date = value ? new Date(value) : new Date(Date.now() + 60000);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
@@ -86,12 +153,12 @@ function SetTimerView({ server }) {
   const load = useCallback(async () => {
     setLoading(true); setError(""); setMessage("");
     try {
-      const [timerResponse, concertResponse] = await Promise.all([fetch(`${server.apiBaseUrl}/timers`), fetch(`${server.apiBaseUrl}/concerts`)]);
+      const [timerResponse, concertResponse] = await Promise.all([fetch(`${server.apiBaseUrl}/timers`), fetch(`${server.apiBaseUrl}/playings`)]);
       if (!timerResponse.ok) throw new Error(await responseError(timerResponse));
       if (!concertResponse.ok) throw new Error(await responseError(concertResponse));
       const timerBody = await timerResponse.json();
       const concertBody = await concertResponse.json();
-      setConcerts(concertBody.concerts || []);
+      setConcerts(concertBody.playings || []);
       const nextRows = (timerBody.timers || []).map((timer) => ({ ...timer, ...splitInterval(timer.intervalSeconds), firstRunLocal: toLocalDateTime(timer.firstRunAt), isNew: false }));
       setRows(nextRows);
       setSelectedId((current) => nextRows.some((row) => row.id === current) ? current : nextRows[0]?.id || null);
@@ -102,10 +169,10 @@ function SetTimerView({ server }) {
   useEffect(() => {
     if (!selectedRow?.concertName) { setInputVariables([]); return; }
     const path = selectedRow.concertName.split("/").map(encodeURIComponent).join("/");
-    fetch(`${server.apiBaseUrl}/concerts/${path}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load Concert inputs."))).then((body) => {
+    fetch(`${server.apiBaseUrl}/playings/${path}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load Concert inputs."))).then((body) => {
       const variables = body.inputVariables || [];
       setInputVariables(variables);
-      setRows((current) => current.map((row) => row.id !== selectedRow.id ? row : { ...row, params: Object.fromEntries(variables.map((item) => { const key = inputVariableKey(item); return [key, displayValue(row.params?.[key] ?? item.defaultValue ?? "")]; })) }));
+      setRows((current) => current.map((row) => row.id !== selectedRow.id ? row : { ...row, params: Object.fromEntries(variables.map((item) => { const key = inputVariableKey(item); return [key, displayValue(row.params?.[key] ?? "")]; })) }));
     }).catch((loadError) => setError(loadError.message));
   }, [selectedId, selectedRow?.concertName, server.apiBaseUrl]);
 
@@ -118,20 +185,37 @@ function SetTimerView({ server }) {
   };
   const save = async () => {
     setError(""); setMessage("");
-    const timers = rows.map((row) => ({ id: row.isNew ? null : row.id, name: row.name.trim(), concertName: row.concertName, intervalSeconds: Number(row.interval) * intervalUnits[row.intervalUnit], firstRunAt: new Date(row.firstRunLocal).toISOString(), enabled: row.enabled, params: row.params || {} }));
-    if (timers.some((timer) => !timer.name || !timer.concertName || timer.intervalSeconds < 1 || Number.isNaN(new Date(timer.firstRunAt).getTime()))) { setError("Complete every timer name, Concert, interval, and first run time before saving."); return; }
-    const response = await fetch(`${server.apiBaseUrl}/timers`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timers }) });
-    if (!response.ok) { setError(await responseError(response)); return; }
-    await load(); setMessage("Timer settings saved.");
+    try {
+      const definitionsByConcert = new Map(await Promise.all([...new Set(rows.map((row) => row.concertName).filter(Boolean))].map(async (concertName) => {
+        const path = concertName.split("/").map(encodeURIComponent).join("/");
+        const response = await fetch(`${server.apiBaseUrl}/playings/${path}`);
+        if (!response.ok) throw new Error(`Unable to load input definitions for ${concertName}.`);
+        const body = await response.json();
+        return [concertName, body.inputVariables || []];
+      })));
+      const timers = rows.map((row) => {
+        const definitions = definitionsByConcert.get(row.concertName) || [];
+        const params = Object.fromEntries(definitions.map((item) => {
+          const key = inputVariableKey(item);
+          const value = row.params?.[key];
+          if (String(value ?? "").trim() === "") throw new Error(`${row.name || "Timer"}: $${key} User Value is required.`);
+          return [key, coerceVariableValue(value, item.type, `$${key}`)];
+        }));
+        return { id: row.isNew ? null : row.id, name: row.name.trim(), concertName: row.concertName, intervalSeconds: Number(row.interval) * intervalUnits[row.intervalUnit], firstRunAt: new Date(row.firstRunLocal).toISOString(), enabled: row.enabled, params };
+      });
+      if (timers.some((timer) => !timer.name || !timer.concertName || timer.intervalSeconds < 1 || Number.isNaN(new Date(timer.firstRunAt).getTime()))) throw new Error("Complete every timer name, Concert, interval, and first run time before saving.");
+      const response = await fetch(`${server.apiBaseUrl}/timers`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timers }) });
+      if (!response.ok) throw new Error(await responseError(response));
+      await load(); setMessage("Timer settings saved.");
+    } catch (saveError) { setError(saveError.message); }
   };
   const isEditing = (row, field) => row.isNew || (editing?.id === row.id && editing.field === field);
   const editCell = (row, field) => { setSelectedId(row.id); setEditing({ id: row.id, field }); };
 
   return (
     <section className="admin-content timer-admin-content">
-      <div className="content-heading"><div><h1>Set Timer</h1><p>Double-click a cell to edit it, then save all changes together.</p></div></div>
+      <div className="content-heading"><div><h1>Timers</h1><p>Double-click a cell to edit it, then save all changes together.</p></div></div>
       <div className="grid-toolbar"><button type="button" onClick={addRow}>Add</button><button className="primary-button" type="button" onClick={save}>Save</button><button type="button" onClick={load}>Refresh</button></div>
-      {error && <div className="error-message content-error">{error}</div>}{message && <div className="success-message">{message}</div>}
       <div className="timer-grid-wrap"><table className="timer-grid"><thead><tr><th>Timer Name</th><th>Concert File</th><th>Interval</th><th>Unit</th><th>First Run</th><th>Enable</th><th>Running</th><th>Last Run Time</th><th>Last Duration</th><th></th></tr></thead><tbody>
         {loading && <tr><td colSpan="10" className="empty-list">Loading timers…</td></tr>}
         {!loading && rows.length === 0 && <tr><td colSpan="10" className="empty-list">No timers are configured.</td></tr>}
@@ -149,8 +233,9 @@ function SetTimerView({ server }) {
       <section className="input-values-panel"><div className="input-values-title"><strong>Concert Input Values</strong><span>{selectedRow?.concertName || "Select a timer row"}</span></div>
         {!selectedRow && <div className="empty-list">Select a timer row to edit its Concert input values.</div>}
         {selectedRow && inputVariables.length === 0 && <div className="empty-list">This Concert has no input values.</div>}
-        {selectedRow && inputVariables.length > 0 && <div className="input-values-grid">{inputVariables.map((item) => { const key = inputVariableKey(item); return <label key={key}><span>${key}</span><input value={selectedRow.params?.[key] ?? ""} placeholder={displayValue(item.defaultValue)} onChange={(event) => updateRow(selectedRow.id, { params: { ...(selectedRow.params || {}), [key]: event.target.value } })} /></label>; })}</div>}
+        {selectedRow && inputVariables.length > 0 && <div className="input-values-grid"><div className="input-values-grid-header"><span>Name</span><span>Type</span><span>Default Value</span><span>User Value</span></div>{inputVariables.map((item) => { const key = inputVariableKey(item); return <div className="input-variable-row" key={key}><input value={`$${key}`} readOnly /><select value={item.type || ""} disabled><option value="">Type required</option><option value="string">string</option><option value="number">number</option><option value="datetime">datetime</option></select><input type={variableInputType(item.type)} step={item.type === "datetime" ? "1" : undefined} value={variableInputValue(item.defaultValue, item.type)} disabled /><input type={variableInputType(item.type)} step={item.type === "datetime" ? "1" : undefined} value={variableInputValue(selectedRow.params?.[key], item.type)} onChange={(event) => updateRow(selectedRow.id, { params: { ...(selectedRow.params || {}), [key]: event.target.value } })} /></div>; })}</div>}
       </section>
+      <MessageDialog type={error ? "error" : "success"} message={error || message} onClose={() => { setError(""); setMessage(""); }} />
     </section>
   );
 }
@@ -224,7 +309,6 @@ function DbConnectionsView({ server }) {
     <section className="admin-content timer-admin-content">
       <div className="content-heading"><div><h1>DB Connections</h1><p>Double-click a cell to edit it, then save all changes together.</p></div></div>
       <div className="grid-toolbar"><button type="button" onClick={add}>Add</button><button className="primary-button" type="button" onClick={save}>Save</button><button type="button" onClick={load}>Refresh</button><button type="button" disabled={!selectedRow || testing} onClick={test}>{testing ? "Testing…" : "Connection Test"}</button></div>
-      {error && <div className="error-message content-error">{error}</div>}{message && <div className="success-message">{message}</div>}
       <div className="timer-grid-wrap"><table className="connection-grid"><thead><tr><th>Name</th><th>User</th><th>Password</th><th>DSN</th><th>Enable</th><th>PM</th><th></th></tr></thead><tbody>
         {loading && <tr><td colSpan="7" className="empty-list">Loading connections…</td></tr>}
         {!loading && rows.length === 0 && <tr><td colSpan="7" className="empty-list">No connections are configured.</td></tr>}
@@ -238,6 +322,7 @@ function DbConnectionsView({ server }) {
           <td><button className="danger-text-button" type="button" onClick={() => { setRows((current) => current.filter((item) => item.key !== row.key)); if (selectedKey === row.key) setSelectedKey(null); }}>Delete</button></td>
         </tr>)}</tbody></table></div>
       {dsnRow && <DsnEditorDialog value={dsnRow.dsn} onChange={(dsn) => updateRow(dsnRow.key, { dsn })} onClose={() => setDsnRowKey(null)} />}
+      <MessageDialog type={error ? "error" : "success"} message={error || message} onClose={() => { setError(""); setMessage(""); }} />
     </section>
   );
 }
@@ -282,7 +367,7 @@ export default function App() {
       <main className="main-workspace">
         <section className={`admin-tab-shell${tabs.length === 0 ? " empty" : ""}`}>
           {tabs.length > 0 && <div className="tab-strip">{tabs.map((tab) => <button className={`tab-button${tab.id === activeTabId ? " active" : ""}`} type="button" key={tab.id} onClick={() => setActiveTabId(tab.id)}><span className="tab-title">{tab.name}</span><span className="tab-server-badge">{tab.host}:{tab.port}</span><span className="tab-close" role="button" aria-label={`Close ${tab.name}`} tabIndex={0} onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</span></button>)}</div>}
-          {activeTab && <div className="server-workspace"><aside className="side-navigation"><div className="side-navigation-title">Administration</div><button className={`side-navigation-item${activeTab.activeView === "timer" ? " active" : ""}`} type="button" onClick={() => setTabView(activeTab.id, "timer")}>Set Timer</button><button className={`side-navigation-item${activeTab.activeView === "connections" ? " active" : ""}`} type="button" onClick={() => setTabView(activeTab.id, "connections")}>DB Connections</button></aside>{activeTab.activeView === "connections" ? <DbConnectionsView server={activeTab} /> : <SetTimerView server={activeTab} />}</div>}
+          {activeTab && <div className="server-workspace"><aside className="side-navigation"><div className="side-navigation-title">Administration</div><button className={`side-navigation-item${activeTab.activeView === "timer" ? " active" : ""}`} type="button" onClick={() => setTabView(activeTab.id, "timer")}>Timers</button><button className={`side-navigation-item${activeTab.activeView === "connections" ? " active" : ""}`} type="button" onClick={() => setTabView(activeTab.id, "connections")}>DB Connections</button></aside>{activeTab.activeView === "connections" ? <DbConnectionsView server={activeTab} /> : <SetTimerView server={activeTab} />}</div>}
         </section>
       </main>
       {showServerDialog && <ServerOpenDialog onClose={() => setShowServerDialog(false)} onOpen={openServer} />}

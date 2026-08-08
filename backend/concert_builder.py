@@ -13,6 +13,7 @@ import pandas as pd
 from oracle_client import execute_oracle_query_records, execute_oracle_write_records
 from opl_builder import build_and_solve_opl
 from task import Task
+from variable_types import runtime_params as _typed_runtime_params
 
 
 _CONCERT_VAR_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
@@ -83,25 +84,7 @@ def _variable_name(item):
 
 
 def _runtime_params(global_variables=None, input_variables=None, params=None):
-    result = {}
-    for item in global_variables or []:
-        if not isinstance(item, dict):
-            continue
-        name = _variable_name(item)
-        if name:
-            result[name] = item.get("value")
-
-    for item in input_variables or []:
-        if not isinstance(item, dict):
-            continue
-        name = _variable_name(item)
-        if name:
-            result[name] = item.get("defaultValue")
-
-    for key, value in (params or {}).items():
-        name = str(key)[1:] if str(key).startswith("$") else str(key)
-        result[name] = value
-    return result
+    return _typed_runtime_params(global_variables, input_variables, params)
 
 
 def _resolve_connection(connection, params):
@@ -622,7 +605,7 @@ def build_concert(
     nodes,
     edges,
     params=None,
-    concert_root="./concerts",
+    concert_root="./playings",
     replay_root="./replay",
     call_stack=None,
     call_ids=None,

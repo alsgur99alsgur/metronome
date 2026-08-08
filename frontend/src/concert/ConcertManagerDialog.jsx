@@ -10,7 +10,7 @@ const responseError = async (response) => {
 
 export default function ConcertManagerDialog({ apiBaseUrl, serverName, onDeploymentChange, onClose }) {
   const [selected, setSelected] = useState(null);
-  const [deployments, setDeployments] = useState({ concerts: [], rehearsals: [], backups: [] });
+  const [deployments, setDeployments] = useState({ playings: [], rehearsals: [], backups: [] });
   const [directories, setDirectories] = useState([]);
   const [targetDirectory, setTargetDirectory] = useState("");
   const [showMove, setShowMove] = useState(false);
@@ -53,7 +53,7 @@ export default function ConcertManagerDialog({ apiBaseUrl, serverName, onDeploym
   };
 
   const canMove = (item) => {
-    if (item?.kind !== "concert") return false;
+    if (item?.kind !== "playing") return false;
     const basename = item.name.split("/").pop();
     return !deployments.rehearsals.some(
       (rehearsal) => rehearsal.name.split("/").pop() === basename,

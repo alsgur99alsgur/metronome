@@ -5,7 +5,7 @@ from uuid import UUID
 
 
 class ConcertStore:
-    def __init__(self, path="./concerts"):
+    def __init__(self, path="./playings"):
         self.path = path
         os.makedirs(self.path, exist_ok=True)
 
@@ -33,11 +33,11 @@ class ConcertStore:
         return path
 
     @staticmethod
-    def validate_id(concert_id):
+    def validate_id(concert_id, field_name="concertId"):
         try:
             return str(UUID(str(concert_id)))
         except (ValueError, TypeError, AttributeError) as exc:
-            raise ValueError(f"Invalid concertId: {concert_id}") from exc
+            raise ValueError(f"Invalid {field_name}: {concert_id}") from exc
 
     def _id_registry(self):
         registry = {}
@@ -94,7 +94,7 @@ class ConcertStore:
         next_edge["data"] = data
         return next_edge
 
-    def save(self, concert_id, name, nodes, edges, global_variables=None, input_variables=None, version=""):
+    def save(self, concert_id, last_commit_id, commit_id, name, nodes, edges, global_variables=None, input_variables=None, version=""):
         concert_id = self.validate_id(concert_id)
         registry = self._id_registry()
         concert_name = self.safe_path_name(name)
@@ -108,6 +108,8 @@ class ConcertStore:
             raise ValueError(f"Concert name belongs to another concertId: {concert_name}")
         payload = {
             "concertId": concert_id,
+            "lastCommitId": last_commit_id,
+            "commitId": commit_id,
             "version": version,
             "name": concert_name,
             "nodes": [self._clean_node_for_save(node) for node in nodes],

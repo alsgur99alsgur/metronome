@@ -22,27 +22,16 @@ class DeploymentMismatchError(ValueError):
         super().__init__(message)
 
 
-class VersionMismatchError(DeploymentMismatchError):
-    def __init__(self, name, current_version, next_version):
-        super().__init__(
-            f"Production version mismatch: {current_version} -> {next_version}",
-            "version",
-            name=name,
-            currentVersion=current_version,
-            nextVersion=next_version,
-        )
-
-
 class DeploymentStore:
     VERSION_PATTERN = re.compile(r"[A-Za-z0-9.-]+")
 
     def __init__(self, root):
         self.root = os.path.abspath(root)
-        self.concerts_root = os.path.join(self.root, "concerts")
+        self.playings_root = os.path.join(self.root, "playings")
         self.rehearsals_root = os.path.join(self.root, "rehearsals")
         self.backups_root = os.path.join(self.root, "backups")
         self.transactions_root = os.path.join(self.rehearsals_root, ".deploy")
-        for path in (self.concerts_root, self.rehearsals_root, self.backups_root, self.transactions_root):
+        for path in (self.playings_root, self.rehearsals_root, self.backups_root, self.transactions_root):
             os.makedirs(path, exist_ok=True)
         self._sync_directories()
         self._guard = Lock()
@@ -89,9 +78,9 @@ class DeploymentStore:
 
     def _sync_directories(self):
         expected = {""}
-        for current_root, folders, _ in os.walk(self.concerts_root):
+        for current_root, folders, _ in os.walk(self.playings_root):
             folders[:] = [folder for folder in folders if not folder.startswith(".")]
-            relative = os.path.relpath(current_root, self.concerts_root)
+            relative = os.path.relpath(current_root, self.playings_root)
             if relative != ".":
                 expected.add(relative.replace(os.sep, "/"))
         for root in (self.rehearsals_root, self.backups_root):
@@ -111,7 +100,7 @@ class DeploymentStore:
 
     def _validate_target_directory(self, name):
         directory = os.path.dirname(self.validate_name(name))
-        if directory and not os.path.isdir(self._path(self.concerts_root, directory)):
+        if directory and not os.path.isdir(self._path(self.playings_root, directory)):
             raise FileNotFoundError(f"Concert directory not found: {directory}")
 
     @staticmethod
@@ -164,10 +153,21 @@ class DeploymentStore:
         if os.path.basename(name) != name:
             raise ValueError("Concert name must not contain a directory.")
         concert_id = ConcertStore.validate_id(payload.get("concertId"))
+        commit_id = ConcertStore.validate_id(payload.get("commitId"), "commitId")
+        last_commit_id = payload.get("lastCommitId")
+        if last_commit_id is not None:
+            last_commit_id = ConcertStore.validate_id(last_commit_id, "lastCommitId")
         version = self.validate_version(payload.get("version"))
         if not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
             raise ValueError("Concert payload requires nodes and edges arrays.")
-        return {**payload, "concertId": concert_id, "name": name, "version": version}
+        return {
+            **payload,
+            "concertId": concert_id,
+            "lastCommitId": last_commit_id,
+            "commitId": commit_id,
+            "name": name,
+            "version": version,
+        }
 
     def _rehearsal_with_basename(self, basename):
         for current_root, folders, files in os.walk(self.rehearsals_root):
@@ -186,15 +186,15 @@ class DeploymentStore:
                     return manifest["name"]
         return None
 
-    def _production_with_basename(self, basename):
+    def _playing_with_basename(self, basename):
         matches = []
-        for current_root, folders, files in os.walk(self.concerts_root):
+        for current_root, folders, files in os.walk(self.playings_root):
             folders[:] = [folder for folder in folders if not folder.startswith(".")]
             if f"{basename}.concert" in files:
                 path = os.path.join(current_root, f"{basename}.concert")
-                matches.append(os.path.relpath(path, self.concerts_root).replace(os.sep, "/")[:-8])
+                matches.append(os.path.relpath(path, self.playings_root).replace(os.sep, "/")[:-8])
         if len(matches) > 1:
-            raise ValueError(f"Multiple Production Concerts have the same filename: {basename}")
+            raise ValueError(f"Multiple Playing Concerts have the same filename: {basename}")
         return matches[0] if matches else None
 
     def _backup_ids_with_basename(self, basename):
@@ -216,25 +216,26 @@ class DeploymentStore:
         source_name = self.validate_name(source_name or name)
         if os.path.basename(source_name) != os.path.basename(name):
             raise ValueError("Deployment may change only the Concert directory, not its filename.")
-        production_name = self._production_with_basename(os.path.basename(name))
-        if production_name:
-            if name != production_name:
-                raise ValueError(f"Existing Production must be deployed to its current directory: {production_name}")
-            current_version = self._version(self._concert_path(self.concerts_root, production_name))
-            current_id = self._read(self._concert_path(self.concerts_root, production_name))["concertId"]
+        playing_name = self._playing_with_basename(os.path.basename(name))
+        if playing_name:
+            if name != playing_name:
+                raise ValueError(f"Existing Playing must be deployed to its current directory: {playing_name}")
+            playing_payload = self._read(self._concert_path(self.playings_root, playing_name))
+            current_id = playing_payload["concertId"]
+            playing_commit_id = ConcertStore.validate_id(playing_payload.get("commitId"), "commitId")
+            if payload["lastCommitId"] != playing_commit_id and not allow_mismatch:
+                raise DeploymentMismatchError("Commit ID mismatch.", "commitId")
             if current_id != payload["concertId"] and not allow_mismatch:
                 raise DeploymentMismatchError(
-                    f"Production concertId mismatch: {current_id}",
-                    "productionConcertId",
+                    f"Playing concertId mismatch: {current_id}",
+                    "playingConcertId",
                     currentConcertId=current_id,
                     nextConcertId=payload["concertId"],
                 )
-            if current_version != payload["version"] and not allow_mismatch:
-                raise VersionMismatchError(production_name, current_version, payload["version"])
-            source_name = production_name
+            source_name = playing_name
         else:
             try:
-                owner = ConcertStore(self.concerts_root).name_for_id(payload["concertId"])
+                owner = ConcertStore(self.playings_root).name_for_id(payload["concertId"])
             except FileNotFoundError:
                 owner = None
             if owner:
@@ -259,6 +260,7 @@ class DeploymentStore:
             manifest_path = os.path.join(transaction_root, "manifest.json")
             if os.path.exists(manifest_path):
                 raise FileExistsError(f"Deployment transaction already exists: {transaction_id}")
+            payload["lastCommitId"] = payload["commitId"]
             data = self._payload_bytes(payload)
             try:
                 self._write(staged, data)
@@ -362,23 +364,23 @@ class DeploymentStore:
     def promote(self, name):
         name = self.validate_name(name)
         rehearsal = self._concert_path(self.rehearsals_root, name)
-        production = self._concert_path(self.concerts_root, name)
+        playing = self._concert_path(self.playings_root, name)
         with self._lock_for(name):
             if not os.path.exists(rehearsal):
                 raise FileNotFoundError(f"Rehearsal not found: {name}")
             self._version(rehearsal)
             backup = None
-            if os.path.exists(production):
-                backup = self._backup_path(name, self._version(production))
+            if os.path.exists(playing):
+                backup = self._backup_path(name, self._version(playing))
                 os.makedirs(os.path.dirname(backup), exist_ok=True)
-                os.replace(production, backup)
+                os.replace(playing, backup)
             try:
-                os.makedirs(os.path.dirname(production), exist_ok=True)
-                os.replace(rehearsal, production)
-                os.utime(production, None)
+                os.makedirs(os.path.dirname(playing), exist_ok=True)
+                os.replace(rehearsal, playing)
+                os.utime(playing, None)
             except Exception:
                 if backup and os.path.exists(backup):
-                    os.replace(backup, production)
+                    os.replace(backup, playing)
                 raise
         self._sync_directories()
         return {"promoted": True, "name": name}
@@ -393,22 +395,22 @@ class DeploymentStore:
         if len(parts) != 3 or not parts[0]:
             raise ValueError(f"Invalid backup filename: {file_name}")
         name = self.validate_name("/".join(part for part in (folder, parts[0]) if part))
-        production = self._concert_path(self.concerts_root, name)
+        playing = self._concert_path(self.playings_root, name)
         with self._lock_for(name):
             self._version(backup)
             current_backup = None
-            if os.path.exists(production):
-                current_backup = self._backup_path(name, self._version(production))
+            if os.path.exists(playing):
+                current_backup = self._backup_path(name, self._version(playing))
                 os.makedirs(os.path.dirname(current_backup), exist_ok=True)
-                os.replace(production, current_backup)
+                os.replace(playing, current_backup)
                 os.utime(current_backup, None)
             try:
-                os.makedirs(os.path.dirname(production), exist_ok=True)
-                os.replace(backup, production)
-                os.utime(production, None)
+                os.makedirs(os.path.dirname(playing), exist_ok=True)
+                os.replace(backup, playing)
+                os.utime(playing, None)
             except Exception:
                 if current_backup and os.path.exists(current_backup):
-                    os.replace(current_backup, production)
+                    os.replace(current_backup, playing)
                 raise
         self._sync_directories()
         return {"rolledBack": True, "name": name}
@@ -422,10 +424,10 @@ class DeploymentStore:
             return {"moved": True, "name": name}
         if self._rehearsal_with_basename(os.path.basename(name)):
             raise FileExistsError(f"Rehearsal exists for Concert: {os.path.basename(name)}")
-        production = self._concert_path(self.concerts_root, name)
-        target = self._concert_path(self.concerts_root, target_name)
-        if not os.path.isfile(production):
-            raise FileNotFoundError(f"Production Concert not found: {name}")
+        playing = self._concert_path(self.playings_root, name)
+        target = self._concert_path(self.playings_root, target_name)
+        if not os.path.isfile(playing):
+            raise FileNotFoundError(f"Playing Concert not found: {name}")
         if os.path.exists(target):
             raise FileExistsError(f"Target Concert already exists: {target_name}")
         source_folder, base = os.path.split(name)
@@ -433,7 +435,7 @@ class DeploymentStore:
         backup_root = self._path(self.backups_root, source_folder)
         if os.path.isdir(backup_root):
             backup_files = [file_name for file_name in os.listdir(backup_root) if file_name.startswith(f"{base}@") and file_name.endswith(".concert")]
-        moves = [(production, target)] + [
+        moves = [(playing, target)] + [
             (
                 self._path(self.backups_root, "/".join(part for part in (source_folder, file_name) if part)),
                 self._path(self.backups_root, "/".join(part for part in (directory, file_name) if part)),
@@ -455,13 +457,13 @@ class DeploymentStore:
                     os.replace(destination, source)
                     self._rename_payload(source, name)
                 raise
-        self._prune_empty(self.concerts_root, os.path.dirname(production))
+        self._prune_empty(self.playings_root, os.path.dirname(playing))
         self._sync_directories()
         return {"moved": True, "name": target_name}
 
     def delete(self, kind, path):
         roots = {
-            "concert": self.concerts_root,
+            "playing": self.playings_root,
             "rehearsal": self.rehearsals_root,
             "backup": self.backups_root,
         }
@@ -479,7 +481,7 @@ class DeploymentStore:
         return {"deleted": True, "kind": kind, "path": relative}
 
     def load_file(self, kind, path):
-        roots = {"concert": self.concerts_root, "rehearsal": self.rehearsals_root, "backup": self.backups_root}
+        roots = {"playing": self.playings_root, "rehearsal": self.rehearsals_root, "backup": self.backups_root}
         if kind not in roots:
             raise ValueError(f"Invalid deployment kind: {kind}")
         relative = str(path or "").replace("\\", "/").strip("/")
@@ -546,7 +548,7 @@ class DeploymentStore:
         directory = self.validate_directory(directory)
         if not directory:
             raise ValueError("Directory name is required.")
-        for root in (self.concerts_root, self.rehearsals_root, self.backups_root):
+        for root in (self.playings_root, self.rehearsals_root, self.backups_root):
             os.makedirs(self._path(root, directory), exist_ok=True)
         return {"directory": directory}
 
@@ -555,23 +557,32 @@ class DeploymentStore:
         if not directory:
             raise ValueError("Root Concert directory cannot be deleted.")
         paths = [self._path(root, directory) for root in (
-            self.concerts_root,
+            self.playings_root,
             self.rehearsals_root,
             self.backups_root,
         )]
         if not os.path.isdir(paths[0]):
             raise FileNotFoundError(f"Concert directory not found: {directory}")
-        if any(os.path.isdir(path) and os.listdir(path) for path in paths):
+        ignored_metadata = {".DS_Store"}
+        if any(
+            os.path.isdir(path)
+            and any(entry not in ignored_metadata for entry in os.listdir(path))
+            for path in paths
+        ):
             raise ValueError(f"Concert directory is not empty: {directory}")
         for path in paths:
             if os.path.isdir(path):
+                for entry in ignored_metadata:
+                    metadata_path = os.path.join(path, entry)
+                    if os.path.isfile(metadata_path):
+                        os.unlink(metadata_path)
                 os.rmdir(path)
         return {"deleted": True, "directory": directory}
 
     def list(self):
         self._sync_directories()
         return {
-            "concerts": self._list_root(self.concerts_root, "concert"),
+            "playings": self._list_root(self.playings_root, "playing"),
             "rehearsals": self._list_root(self.rehearsals_root, "rehearsal"),
             "backups": self._list_root(self.backups_root, "backup"),
         }

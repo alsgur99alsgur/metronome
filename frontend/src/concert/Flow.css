@@ -351,6 +351,10 @@ button:disabled {
   padding: 0 6px;
 }
 
+.rehearsal-dialog .concert-folder-create input {
+  width: min(320px, 100%);
+}
+
 .concert-folder-create .dialog-error {
   margin-left: 6px;
 }
@@ -519,20 +523,6 @@ button:disabled {
 .tab-close:hover {
   background: #e2e8f0;
   color: #0f172a;
-}
-
-.tab-new-button {
-  width: 32px;
-  height: 32px;
-  border-color: transparent;
-  background: transparent;
-  border-radius: 6px 6px 0 0;
-  font-size: 18px;
-  padding: 0;
-}
-
-.tab-new-button:hover {
-  background: #e2e8f0;
 }
 
 .sub-toolbar {
@@ -1586,10 +1576,15 @@ pre {
 
 .variable-row {
   display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(120px, 160px) 110px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.variable-type-select {
+  background: #ffffff;
+  color: #111827;
 }
 
 .variable-list {
@@ -3189,6 +3184,18 @@ th {
   white-space: nowrap;
 }
 
+.concert-file-row.concert-kind-row-playing {
+  color: #2563eb;
+}
+
+.concert-file-row.concert-kind-row-rehearsal {
+  color: #dc2626;
+}
+
+.concert-file-row.concert-kind-row-backup {
+  color: #16a34a;
+}
+
 .concert-file-row.openable {
   cursor: pointer;
 }
@@ -3231,6 +3238,10 @@ th {
 .concert-file-row.backup-child {
   background: #ffffff;
   color: #475569;
+}
+
+.concert-file-row.backup-child.concert-kind-row-backup {
+  color: #16a34a;
 }
 
 .concert-file-row.backup-child > span:first-child {
@@ -3342,19 +3353,13 @@ th {
     padding: 4px 8px 0;
   }
 
-  .tab-button,
-  .tab-new-button {
+  .tab-button {
     height: 29px;
   }
 
   .tab-button {
     max-width: 210px;
     gap: 6px;
-  }
-
-  .tab-new-button {
-    width: 29px;
-    font-size: 16px;
   }
 
   .sub-toolbar {

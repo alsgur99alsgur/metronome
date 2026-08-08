@@ -16,5 +16,7 @@ backend/replay/
 events.md
 
 *.concert
+!backend/playings/tests/db_read_loop_resources_call.concert
+!backend/playings/tests/ff_untitled_concert.concert
 
 *.json

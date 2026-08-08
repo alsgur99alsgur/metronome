@@ -20,6 +20,7 @@ export default function Flow() {
   const [showConcertManager, setShowConcertManager] = useState(false);
   const [showConcertList, setShowConcertList] = useState(true);
   const [concertListRefreshKey, setConcertListRefreshKey] = useState(0);
+  const [hasActiveConcert, setHasActiveConcert] = useState(false);
   const [concertListWidth, setConcertListWidth] = useState(430);
   const [servers, setServers] = useState([]);
   const [selectedServerName, setSelectedServerName] = useState("Local");
@@ -170,7 +171,12 @@ export default function Flow() {
                 <button onClick={() => { setActiveMenu(null); setShowStageResources(true); }}>
                   Stage Resources
                 </button>
-                <button onClick={() => { setActiveMenu(null); setDeploySourceName(tabViewRef.current?.activeConcertName() || ""); setDeployTarget("selected"); }}>Rehearsal</button>
+                <button disabled={!hasActiveConcert} onClick={() => {
+                  if (!tabViewRef.current?.hasActiveConcert()) return;
+                  setActiveMenu(null);
+                  setDeploySourceName(tabViewRef.current.activeConcertName());
+                  setDeployTarget("selected");
+                }}>Rehearsal</button>
                 <button onClick={() => { setActiveMenu(null); setShowConcertManager(true); }}>Stage Manager</button>
               </div>
             )}
@@ -203,7 +209,7 @@ export default function Flow() {
                 apiBaseUrl={selectedApiBaseUrl}
                 refreshKey={concertListRefreshKey}
                 onClose={() => setShowConcertList(false)}
-                openKinds={["concert", "rehearsal", "backup"]}
+                openKinds={["playing", "rehearsal", "backup"]}
                 onOpen={(name, item) => tabViewRef.current?.openDeploymentConcert(item).catch((error) => window.alert(error.message))}
               />
             </div>
@@ -223,6 +229,7 @@ export default function Flow() {
             defaultApiBaseUrl={selectedApiBaseUrl}
             servers={servers}
             onServerChange={changeServer}
+            onActiveConcertChange={setHasActiveConcert}
           />
         </div>
       </main>
@@ -240,10 +247,10 @@ export default function Flow() {
           apiBaseUrl={selectedApiBaseUrl}
           onDirectoryCreated={() => setConcertListRefreshKey((value) => value + 1)}
           onClose={() => setDeployTarget(null)}
-          onDeploy={async (version, directory, allowMismatch) => {
+          onDeploy={async (version, directory, allowMismatch, nextCommitId) => {
             const baseName = deploySourceName.split("/").pop();
             const deploymentName = directory ? `${directory}/${baseName}` : baseName;
-            const payload = await tabViewRef.current?.prepareDeployment(version, deploymentName);
+            const payload = await tabViewRef.current?.prepareDeployment(version, deploymentName, nextCommitId);
             if (!payload) throw new Error("No active Concert.");
             const response = await fetch(`${selectedApiBaseUrl}/deployments/rehearsals`, {
               method: "POST",
@@ -261,7 +268,10 @@ export default function Flow() {
               nextError.retryableMismatch = detail?.code === "DEPLOYMENT_MISMATCH";
               throw nextError;
             }
-            return response.json();
+            const result = await response.json();
+            await tabViewRef.current?.completeDeployment(version, nextCommitId);
+            setConcertListRefreshKey((value) => value + 1);
+            return result;
           }}
         />
       )}

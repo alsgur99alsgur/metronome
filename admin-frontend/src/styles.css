@@ -441,6 +441,39 @@ button:disabled {
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
 }
 
+.message-dialog-backdrop {
+  z-index: 120;
+}
+
+.message-dialog {
+  width: 400px;
+}
+
+.message-dialog.error {
+  border-color: #fecaca;
+}
+
+.message-dialog.success {
+  border-color: #86efac;
+}
+
+.message-dialog.error .dialog-titlebar {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.message-dialog.success .dialog-titlebar {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.message-dialog .dialog-body {
+  min-height: 0;
+  color: #334155;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .dialog-titlebar,
 .dialog-actions {
   flex: none;
@@ -472,33 +505,25 @@ button:disabled {
   background: #f8fafc;
 }
 
-.server-option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  cursor: pointer;
-  padding: 11px;
-}
-
-.server-option + .server-option {
-  margin-top: 8px;
-}
-
-.server-option.selected {
-  border-color: #60a5fa;
-  background: #eff6ff;
-}
-
-.server-option-copy {
+.server-select-field {
   display: flex;
   flex-direction: column;
+  gap: 6px;
 }
 
-.server-option-copy span {
+.server-select-field > span {
   color: #64748b;
   font-size: 12px;
+  font-weight: 700;
+}
+
+.server-select-field select {
+  width: 100%;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0 9px;
 }
 
 .timer-admin-content {
@@ -637,26 +662,50 @@ button:disabled {
 }
 
 .input-values-grid {
+  padding: 10px 12px 12px;
+}
+
+.input-values-grid-header,
+.input-variable-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  gap: 12px;
-  padding: 14px;
+  grid-template-columns: minmax(140px, 190px) 120px minmax(200px, 1fr) minmax(200px, 1fr);
+  align-items: center;
+  gap: 8px;
 }
 
-.input-values-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+.input-values-grid-header {
   color: #475569;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 2px 5px;
+  text-transform: uppercase;
 }
 
-.input-values-grid input {
+.input-variable-row {
+  border-top: 1px solid #e2e8f0;
+  padding: 7px 0;
+}
+
+.input-variable-row:first-of-type {
+  border-top: 0;
+}
+
+.input-variable-row input,
+.input-variable-row select {
+  width: 100%;
   height: 30px;
   border: 1px solid #cbd5e1;
   border-radius: 5px;
+  background: #ffffff;
   padding: 0 8px;
+}
+
+.input-variable-row input[readonly],
+.input-variable-row input:disabled,
+.input-variable-row select:disabled {
+  background: #f8fafc;
+  color: #475569;
+  opacity: 1;
 }
 
 .connection-grid {
@@ -764,4 +813,268 @@ button:disabled {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* High-density desktop layout aligned with the main Concert UI. */
+body {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+button {
+  height: 24px;
+  border-radius: 3px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.icon-button {
+  width: 24px;
+}
+
+.toolbar {
+  min-height: 34px;
+  gap: 7px;
+  padding: 4px 8px;
+}
+
+.brand {
+  min-width: 126px;
+  font-size: 11px;
+}
+
+.menu-popover {
+  top: calc(100% + 3px);
+  min-width: 150px;
+  border-radius: 3px;
+  padding: 3px;
+}
+
+.menu-popover button {
+  min-height: 22px;
+  padding: 2px 5px;
+}
+
+.tab-strip {
+  height: 31px;
+  gap: 2px;
+  padding: 3px 6px 0;
+}
+
+.tab-button,
+.tab-new-button {
+  height: 27px;
+  border-radius: 4px 4px 0 0;
+}
+
+.tab-button {
+  max-width: 200px;
+  gap: 5px;
+  padding: 0 5px 0 8px;
+}
+
+.tab-server-badge {
+  border-radius: 3px;
+  font-size: 9px;
+  padding: 1px 4px;
+}
+
+.tab-close {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 15px;
+}
+
+.side-navigation {
+  width: 150px;
+  padding: 7px 5px;
+}
+
+.side-navigation-title {
+  font-size: 9px;
+  padding: 2px 6px 5px;
+}
+
+.side-navigation-item {
+  height: 25px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.admin-content,
+.timer-admin-content {
+  padding: 10px;
+}
+
+.content-heading {
+  gap: 8px;
+  padding-bottom: 7px;
+}
+
+.content-heading h1 {
+  font-size: 15px;
+}
+
+.content-heading p {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.grid-toolbar {
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.timer-grid-wrap,
+.input-values-panel,
+.dialog,
+.dsn-editor {
+  border-radius: 3px;
+}
+
+.timer-grid th,
+.timer-grid td,
+.connection-grid th,
+.connection-grid td {
+  height: 27px;
+  padding: 2px 5px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.timer-grid th,
+.connection-grid th {
+  font-size: 9px;
+}
+
+.timer-grid input:not([type="checkbox"]),
+.timer-grid select,
+.connection-grid input:not([type="checkbox"]) {
+  height: 22px;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+.center-cell input {
+  width: 13px;
+  height: 13px;
+}
+
+.status-badge {
+  border-radius: 3px;
+  font-size: 9px;
+  padding: 1px 5px;
+}
+
+.input-values-panel {
+  margin-top: 8px;
+}
+
+.input-values-title {
+  min-height: 28px;
+  gap: 7px;
+  padding: 4px 6px;
+}
+
+.input-values-title span {
+  font-size: 10px;
+}
+
+.input-values-grid {
+  padding: 5px 6px 6px;
+}
+
+.input-values-grid-header,
+.input-variable-row {
+  grid-template-columns: minmax(120px, 170px) 100px minmax(170px, 1fr) minmax(170px, 1fr);
+  gap: 5px;
+}
+
+.input-values-grid-header {
+  font-size: 9px;
+  padding: 0 2px 3px;
+}
+
+.input-variable-row {
+  padding: 3px 0;
+}
+
+.input-variable-row input,
+.input-variable-row select {
+  height: 22px;
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.empty-list,
+.dialog-message {
+  padding: 10px;
+  font-size: 10px;
+}
+
+.dialog {
+  width: 420px;
+  max-height: 560px;
+}
+
+.message-dialog {
+  width: 360px;
+}
+
+.dialog-titlebar,
+.dialog-actions {
+  gap: 5px;
+  padding: 6px 8px;
+}
+
+.dialog-titlebar h2 {
+  font-size: 12px;
+}
+
+.dialog-body {
+  min-height: 80px;
+  padding: 8px;
+}
+
+.server-select-field {
+  gap: 3px;
+}
+
+.server-select-field > span {
+  font-size: 10px;
+}
+
+.server-select-field select {
+  height: 24px;
+  border-radius: 3px;
+  padding: 0 5px;
+}
+
+.error-message,
+.success-message {
+  border-radius: 3px;
+  padding: 5px 6px;
+}
+
+.dsn-cell {
+  gap: 4px;
+}
+
+.dsn-cell button {
+  height: 21px;
+  font-size: 9px;
+}
+
+.dsn-dialog {
+  width: 680px;
+}
+
+.dsn-editor {
+  height: 260px;
+  padding: 6px;
+  font-size: 11px;
+  line-height: 1.35;
 }

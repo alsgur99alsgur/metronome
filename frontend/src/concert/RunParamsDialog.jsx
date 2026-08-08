@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { coerceVariableValue, variableInputType, variableInputValue } from "./variableTypes";
 
 const safeName = (value) => {
   const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
@@ -19,6 +20,7 @@ export default function RunParamsDialog({
   onCancel,
 }) {
   const [draftValues, setDraftValues] = useState(values || {});
+  const [error, setError] = useState("");
   const draftValuesRef = useRef(values || {});
 
   useEffect(() => {
@@ -28,6 +30,7 @@ export default function RunParamsDialog({
   }, [values]);
 
   const updateValue = (name, value) => {
+    setError("");
     setDraftValues((current) => {
       const nextValues = {
         ...current,
@@ -36,6 +39,18 @@ export default function RunParamsDialog({
       draftValuesRef.current = nextValues;
       return nextValues;
     });
+  };
+
+  const run = () => {
+    try {
+      (inputVariables || []).forEach((item) => {
+        const name = normalizeVariableName(item.name);
+        coerceVariableValue(draftValuesRef.current[name], item.type, name);
+      });
+      onRun(draftValuesRef.current);
+    } catch (runError) {
+      setError(runError.message);
+    }
   };
 
   return (
@@ -60,8 +75,10 @@ export default function RunParamsDialog({
                 <span>{name}</span>
                 <input
                   className="text-input"
+                  type={variableInputType(item.type)}
+                  step={item.type === "datetime" ? "1" : undefined}
                   list={historyId}
-                  value={draftValues[name] ?? ""}
+                  value={variableInputValue(draftValues[name], item.type)}
                   onChange={(event) => updateValue(name, event.target.value)}
                 />
                 <datalist id={historyId}>
@@ -73,11 +90,12 @@ export default function RunParamsDialog({
             );
           })}
         </div>
+        {error && <div className="error-text inline-error">{error}</div>}
 
         <div className="editor-actions">
           <div className="action-spacer" />
           <button onClick={onCancel}>Cancel</button>
-          <button className="primary-button" onClick={() => onRun(draftValuesRef.current)}>
+          <button className="primary-button" onClick={run}>
             Run
           </button>
         </div>
