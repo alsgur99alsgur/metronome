@@ -24,6 +24,8 @@ _BIND_PATTERN = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 _SQL_COMMENT_OR_STRING_PATTERN = re.compile(r"(--[^\n]*|/\*.*?\*/|'(?:''|[^'])*')", re.DOTALL)
 _POOL_LOCK = Lock()
 _SCHEMA_LOCK = Lock()
+_ORACLE_CLIENT_LOCK = Lock()
+_ORACLE_CLIENT_INITIALIZED = False
 _POOLS = {}
 
 
@@ -50,7 +52,21 @@ def _load_oracledb():
         import oracledb  # type: ignore
     except ModuleNotFoundError as exc:
         raise OracleUnavailable("python-oracledb is not installed.") from exc
+    _initialize_oracle_client(oracledb)
     return oracledb
+
+
+def _initialize_oracle_client(oracledb):
+    global _ORACLE_CLIENT_INITIALIZED
+    if _ORACLE_CLIENT_INITIALIZED:
+        return
+    with _ORACLE_CLIENT_LOCK:
+        if _ORACLE_CLIENT_INITIALIZED:
+            return
+        lib_dir = os.path.join(BACKEND_ROOT, "oracle-client")
+        if os.path.isfile(os.path.join(lib_dir, "oci.dll")):
+            oracledb.init_oracle_client(lib_dir=lib_dir)
+        _ORACLE_CLIENT_INITIALIZED = True
 
 
 def _read_connections(path=None):

@@ -5,7 +5,10 @@ from PyInstaller.utils.hooks import collect_all
 datas = []
 binaries = []
 hiddenimports = []
-for package in ("highspy", "numpy", "oracledb", "pandas", "pyarrow", "pyomo"):
+# python-oracledb imports cryptography lazily for the password verifiers used by
+# Oracle Database 12.1 and later.  PyInstaller cannot discover that optional
+# import from static analysis, so collect the package and its native bindings.
+for package in ("cryptography", "highspy", "numpy", "oracledb", "pandas", "pyarrow", "pyomo"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas += package_datas
     binaries += package_binaries
