@@ -10,8 +10,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "build:win": "npm run build && electron-builder --win zip",
-    "pack:win": "npm run build && electron-builder --win --dir"
+    "build:win": "npm run build && node run-electron-builder.cjs --win zip",
+    "pack:win": "npm run build && node run-electron-builder.cjs --win --dir"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

@@ -21,6 +21,18 @@ PowerShell에서 저장소 루트를 연 뒤 실행한다.
 PowerShell 실행 정책이 로컬 스크립트를 막는 경우 현재 창에서만
 `Set-ExecutionPolicy -Scope Process Bypass`를 먼저 실행한다.
 
+### 보안 프로그램이 디렉터리 rename을 차단하는 환경
+
+`frontend/run-electron-builder.cjs`는 Electron Builder의 원래 `rename`을 먼저
+시도한다. 회사 보안 프로그램 등이 rename을 차단해 실패하면 재귀 `copy` 방식으로
+확정한다.
+
+패치 적용 시 `.tmp` 디렉터리는 자동 삭제하지 않는다. 보안 프로그램의 삭제 차단으로
+정상 빌드가 실패하는 것을 피하기 위한 동작이며, 남은 임시 디렉터리는 빌드가 끝난 뒤
+회사 정책에 허용된 방법으로 수동 정리한다.
+
+이 CJS는 `node_modules`를 수정하지 않는다.
+
 완료되면 `frontend\release`에 Windows 포터블 ZIP이 생성된다. ZIP을 쓰기 가능한
 위치(예: `C:\\Metronome-8000`)에 압축 해제한 후 실행한다.
 
