@@ -1,4 +1,7 @@
 {
+  "backend": {
+    "consoleMode": false
+  },
   "oracle": {
     "poolMin": 1,
     "poolMax": 10,

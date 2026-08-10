@@ -4,16 +4,6 @@ const outputHeightCssVar = "--concert-output-height";
 const minOutputHeight = 140;
 const maxOutputHeight = 520;
 
-const statusOrder = {
-  error: 0,
-  running: 1,
-  pending: 2,
-  success: 3,
-  skipped: 4,
-  canceled: 5,
-  idle: 6,
-};
-
 const outputNodeTypes = new Set(["dbRead", "python", "dbWrite", "concert", "concertInput", "concertOutput", "cacheRead", "cacheWrite", "fileRead", "fileWrite"]);
 const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write" })[type] || type;
 
@@ -81,7 +71,7 @@ export default function ConcertOutputPanel({
     () =>
       nodes
         .filter((node) => outputNodeTypes.has(node.type))
-        .map((node, index) => {
+        .map((node) => {
           const nodeRun = run?.nodes?.[node.id];
           const status = nodeRun?.status || node.data?.status || "idle";
           const duration = nodeRun?.durationMs ?? node.data?.runDurationMs;
@@ -90,7 +80,6 @@ export default function ConcertOutputPanel({
 
           return {
             id: node.id,
-            index,
             name: node.data.name,
             type: node.type,
             status,
@@ -101,19 +90,13 @@ export default function ConcertOutputPanel({
             result,
           };
         })
-        .filter((row) => row.status !== "idle" || row.detail || row.id === selectedNode?.id)
-        .sort((a, b) => {
-          const statusDiff = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
-          if (statusDiff !== 0) return statusDiff;
-          return a.index - b.index;
-        }),
+        .filter((row) => row.status !== "idle" || row.detail || row.id === selectedNode?.id),
     [nodes, run, selectedNode],
   );
 
   const selectedOutput = selectedNode
     ? outputRows.find((row) => row.id === selectedNode.id)
     : null;
-  const headerStatus = run?.status || "idle";
   const errorCount = outputRows.filter((row) => row.status === "error").length;
 
   return (
@@ -134,7 +117,6 @@ export default function ConcertOutputPanel({
           <div className="eyebrow">Output</div>
           <h2>Run Output</h2>
         </div>
-        <span className={`run-pill ${headerStatus}`}>{headerStatus}</span>
         <div className="concert-output-summary">
           {errorCount ? `${errorCount} error${errorCount === 1 ? "" : "s"}` : "No errors"}
         </div>

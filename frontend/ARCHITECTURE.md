@@ -4,7 +4,8 @@
 
 `frontend`는 React 19, React Flow, Vite, Electron으로 구성된 Concert 편집 데스크톱 앱이다.
 
-- `src/main.jsx`: React mount
+- `src/main.jsx`: React mount 및 로컬 Monaco 초기화
+- `src/main.jsx`: 일반 앱과 별도 창 DataViewer를 query에 따라 React mount
 - `src/App.jsx`: Concert `Flow`만 렌더링하는 앱 진입점
 - `src/concert/Flow.jsx`: 데스크톱 앱 셸
 - `src/concert/ConcertTabView.jsx`: 편집기의 중심 상태·동작 모듈
@@ -79,7 +80,8 @@
 - `RunParamsDialog.jsx`: 실행 전 input variable 값 입력
 - `RunningDialog.jsx`: 실행 중 상태 및 cancel
 - `ConcertOutputPanel.jsx`: node 상태·duration·result 요약
-- `DataViewerWindow.jsx`: 별도 창의 dataframe filter/sort/CSV
+- `DataViewerWindow.jsx`: 별도 React 창의 dataframe payload 전달
+- `src/data-viewer/DataViewer.jsx`: dataframe filter/sort/CSV와 row/column 가상화. Concert node의 `View Data`는 1,000행 단위 서버 필터·다중 정렬·페이지 조회를 사용한다.
 - `ReplayDialog.jsx`: replay point와 source/caller/parameter 표시
 - `ConcertSearch.jsx`: node data/code/variable 검색과 결과 이동
 
@@ -95,7 +97,7 @@ API 흐름은 `/run` → `/runs/{runId}` polling이며, 상세 dataframe은 `/ru
 
 ## Electron lifecycle
 
-일반 앱은 `electron/main.cjs`가 backend executable을 시작하고 token-protected `/desktop/health`, `/desktop/shutdown`을 사용한다. `--admin` 모드는 백엔드를 시작하지 않고 기존 로컬 서버에 연결해 `admin-dist`를 연다.
+패키지의 `metronome.cmd`는 공용 `electron.exe`를 일반 모드로 실행하고, `metronome_admin.cmd`는 같은 `electron.exe`를 `--admin` 모드로 실행해 `admin-dist`를 연다. 두 프런트는 백엔드 상태를 확인하거나 백엔드 프로세스를 시작·종료하지 않으며, 서버가 실행 중이지 않아도 각각 독립적으로 열린다.
 
 패키지 데이터 위치는 실행 파일 옆이며 Electron이 `METRONOME_DATA_DIR`로 백엔드에 전달한다.
 

@@ -24,16 +24,30 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 현재 창에�
 완료되면 `frontend\release`에 Windows 포터블 ZIP이 생성된다. ZIP을 쓰기 가능한
 위치(예: `C:\\Metronome-8000`)에 압축 해제한 후 실행한다.
 
-압축을 해제한 디렉터리에는 두 UI 실행 파일이 포함된다.
+압축을 해제한 디렉터리에는 다음 실행 파일과 런처가 포함된다.
 
-- `metronome.exe`: 메인 UI와 백엔드를 함께 실행하고 종료한다.
-- `metronome_admin.cmd`: Admin UI만 실행하며, 실행 중인 `metronome.exe`의 백엔드에 연결한다.
+- `metronome_backend.exe`: 독립적인 FastAPI 백엔드 실행 파일이다.
+- `electron.exe`: 프런트와 Admin 프런트가 공유하는 Electron 런타임이다.
+- `metronome.cmd`: `electron.exe`로 메인 프런트만 연다.
+- `metronome_admin.cmd`: `electron.exe --admin`으로 Admin 프런트만 연다.
 
-Admin을 사용하려면 `metronome.exe`를 먼저 실행한다. 두 UI는 동일한 Electron 런타임을 공유하므로 런타임이 중복 패키징되지 않는다.
+백엔드, 메인 프런트, Admin 프런트는 서로 시작하거나 종료하지 않는다. 필요한 프로세스를 각각 실행해야 하며 어떤 순서로 실행해도 다른 프로세스의 시작이 차단되지 않는다. 두 UI는 동일한 `electron.exe`를 공유하므로 런타임이 중복 패키징되지 않는다.
+
+백엔드 콘솔 창은 `config.json`에서 설정한다.
+
+```json
+{
+  "backend": {
+    "consoleMode": true
+  }
+}
+```
+
+`true`이면 `metronome_backend.exe`가 Windows 콘솔을 할당해 로그를 표시하고, `false`이면 콘솔 없이 실행한다. 기본값은 `false`이며 변경 사항은 백엔드를 다음에 시작할 때 적용된다.
 
 ## Data location
 
-실행 후 아래 항목은 모두 `metronome.exe`와 같은 디렉터리 트리에 생성된다.
+실행 후 아래 항목은 모두 `electron.exe`와 같은 디렉터리 트리에 생성된다.
 
 - `config.json`, `connections.json`, `connection_schema_cache.json`, `servers.json`, `timers.json`
 - `playings`, `replay`, `stage`, `tmp`, `rehearsals`, `backups`

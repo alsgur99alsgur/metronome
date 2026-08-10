@@ -35,7 +35,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="metronome-backend",
+    name="metronome_backend",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

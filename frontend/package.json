@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "build:win": "npm run build && electron-builder --win zip",
@@ -20,15 +20,13 @@
     "@mui/icons-material": "^9.1.1",
     "@mui/material": "^9.1.2",
     "axios": "^1.18.1",
+    "monaco-editor": "^0.56.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^24.13.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "electron": "^38.2.1",
     "electron-builder": "^26.0.12",
@@ -36,8 +34,6 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.6.0",
-    "typescript": "~6.0.2",
-    "typescript-eslint": "^8.61.0",
     "vite": "^8.1.0"
   },
   "build": {
@@ -52,18 +48,20 @@
       "electron/**/*",
       "package.json"
     ],
-    "extraResources": [
+    "extraFiles": [
       {
-        "from": "../backend/dist/metronome-backend.exe",
-        "to": "backend/metronome-backend.exe"
-      },
+        "from": "../backend/dist/metronome_backend.exe",
+        "to": "metronome_backend.exe"
+      }
+    ],
+    "extraResources": [
       {
         "from": "../admin-frontend/dist",
         "to": "admin-dist"
       }
     ],
     "win": {
-      "executableName": "metronome",
+      "executableName": "electron",
       "artifactName": "Metronome-${version}-win-${arch}.${ext}",
       "target": [
         "zip"

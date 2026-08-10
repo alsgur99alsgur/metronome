@@ -6,6 +6,7 @@ import shutil
 from threading import Lock
 
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 
 from json_serialization import json_default
 
@@ -246,7 +247,7 @@ class CacheDataStore:
         node = (metadata.get("nodes") or {}).get(node_id)
         if not node or not node.get("file"):
             raise FileNotFoundError(f"Cache data not found for node: {node_id}")
-        df = pd.read_parquet(os.path.join(cache_path, node["file"]))
+        df = pd.read_parquet(os.path.join(cache_path, node["file"])).reset_index(drop=True)
         dtypes = {str(column): str(dtype) for column, dtype in df.dtypes.items()}
         grid_df = df.iloc[offset : offset + max_grid_rows].astype(object)
         grid_df = grid_df.where(pd.notnull(grid_df), None)
@@ -264,6 +265,141 @@ class CacheDataStore:
             "returnedRows": len(data),
             "hasMore": offset + len(data) < len(df),
             "truncated": offset + len(data) < len(df),
+        }
+
+    @classmethod
+    def query_node_result(
+        cls,
+        base_path,
+        cache_id,
+        node_id,
+        offset=0,
+        limit=1000,
+        search="",
+        filters=None,
+        sorts=None,
+    ):
+        found = cls.find_cache(base_path, cache_id)
+        if not found:
+            raise FileNotFoundError(f"Cache not found: {cache_id}")
+        _, _, cache_path, metadata = found
+        node = (metadata.get("nodes") or {}).get(node_id)
+        if not node or not node.get("file"):
+            raise FileNotFoundError(f"Cache data not found for node: {node_id}")
+
+        df = pd.read_parquet(os.path.join(cache_path, node["file"]))
+        df.columns = [str(column) for column in df.columns]
+        columns = list(df.columns)
+        dtypes = {column: str(df[column].dtype) for column in columns}
+        total_rows = int(len(df))
+
+        term = str(search or "").strip().casefold()
+        if term:
+            mask = pd.Series(False, index=df.index)
+            for column in columns:
+                mask |= df[column].fillna("").astype(str).str.casefold().str.contains(
+                    term, regex=False
+                )
+            df = df.loc[mask]
+
+        filter_operators = {
+            "contains", "notContains", "startsWith", "endsWith",
+            "equals", "notEquals", "gte", "gt", "lte", "lt",
+            "empty", "notEmpty",
+        }
+        comparison_operators = {
+            "equals", "notEquals", "gte", "gt", "lte", "lt",
+        }
+        text_operators = {
+            "contains", "notContains", "startsWith", "endsWith",
+        }
+        legacy_numeric_operators = {
+            "eq", "ne", "gte", "gt", "lte", "lt", "empty", "notEmpty",
+        }
+        for item in filters or []:
+            column = item.get("column")
+            operator = item.get("operator")
+            value = str(item.get("value", ""))
+            if column not in columns:
+                raise ValueError(f"Unknown filter column: {column}")
+            numeric = is_numeric_dtype(df[column].dtype)
+            if operator not in filter_operators and operator not in legacy_numeric_operators:
+                raise ValueError(f"Invalid filter operator for {column}: {operator}")
+            if operator == "empty":
+                df = df.loc[df[column].isna() | (df[column].astype(str) == "")]
+                continue
+            if operator == "notEmpty":
+                df = df.loc[df[column].notna() & (df[column].astype(str) != "")]
+                continue
+            if not value:
+                continue
+            if operator in text_operators:
+                series = df[column].fillna("").astype(str).str.casefold()
+                target = value.casefold()
+                masks = {
+                    "contains": series.str.contains(target, regex=False),
+                    "notContains": ~series.str.contains(target, regex=False),
+                    "startsWith": series.str.startswith(target),
+                    "endsWith": series.str.endswith(target),
+                }
+            elif numeric and (operator in comparison_operators or operator in {"eq", "ne"}):
+                try:
+                    target = float(value)
+                except ValueError as exc:
+                    raise ValueError(f"Numeric filter value required for {column}") from exc
+                series = pd.to_numeric(df[column], errors="coerce")
+                masks = {
+                    "equals": series == target, "notEquals": series != target,
+                    "eq": series == target, "ne": series != target,
+                    "gte": series >= target, "gt": series > target,
+                    "lte": series <= target, "lt": series < target,
+                }
+            else:
+                series = df[column].fillna("").astype(str).str.casefold()
+                target = value.casefold()
+                masks = {
+                    "equals": series == target,
+                    "notEquals": series != target,
+                    "gte": series >= target,
+                    "gt": series > target,
+                    "lte": series <= target,
+                    "lt": series < target,
+                }
+            df = df.loc[masks[operator]]
+
+        sort_columns = []
+        ascending = []
+        for item in sorts or []:
+            column = item.get("column")
+            direction = item.get("direction")
+            if column not in columns:
+                raise ValueError(f"Unknown sort column: {column}")
+            if direction not in {"asc", "desc"}:
+                raise ValueError(f"Invalid sort direction for {column}: {direction}")
+            if column in sort_columns:
+                raise ValueError(f"Duplicate sort column: {column}")
+            sort_columns.append(column)
+            ascending.append(direction == "asc")
+        if sort_columns:
+            df = df.sort_values(sort_columns, ascending=ascending, kind="mergesort")
+
+        filtered_rows = int(len(df))
+        page = df.iloc[offset : offset + limit].astype(object)
+        row_numbers = [int(index) + 1 for index in page.index]
+        page = page.where(pd.notnull(page), None)
+        page = page.replace({float("inf"): None, float("-inf"): None})
+        data = page.to_dict(orient="records")
+        return {
+            "kind": "dataframe",
+            "rows": total_rows,
+            "filteredRows": filtered_rows,
+            "columns": columns,
+            "dtypes": dtypes,
+            "data": data,
+            "rowNumbers": row_numbers,
+            "offset": offset,
+            "returnedRows": len(data),
+            "hasMore": offset + len(data) < filtered_rows,
         }
 
     @classmethod

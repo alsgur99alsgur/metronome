@@ -10,6 +10,9 @@ BACKEND_ROOT = os.environ.get(
 CONFIG_PATH = os.path.join(BACKEND_ROOT, "config.json")
 
 DEFAULT_CONFIG = {
+    "backend": {
+        "consoleMode": False,
+    },
     "oracle": {
         "poolMin": 1,
         "poolMax": 4,

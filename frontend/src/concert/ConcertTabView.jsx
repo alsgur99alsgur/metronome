@@ -140,7 +140,7 @@ const graphForHistory = (graph) => {
       runtimeNodeDataKeys.forEach((key) => {
         delete data[key];
       });
-      return { ...node, data };
+      return { ...node, selected: false, data };
     }),
   };
 };
@@ -630,11 +630,11 @@ const hasConcertNodeChange = (changes) =>
 const hasConcertEdgeChange = (changes) =>
   changes.some((change) => change.type !== "select");
 
-function ContextMenu({ menu, onViewData, onViewLp, onOpenConcert, canViewLp }) {
+function ContextMenu({ menu, menuRef, onViewData, onViewLp, onOpenConcert, canViewLp }) {
   if (!menu) return null;
 
   return (
-    <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
+    <div ref={menuRef} className="context-menu" style={{ left: menu.x, top: menu.y }}>
       <button onClick={() => onViewData(menu.node)}>View Data</button>
       {menu.node.type === "opl" && canViewLp && (
         <button onClick={() => onViewLp(menu.node)}>View LP</button>
@@ -1360,7 +1360,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const [version, setVersion] = useState("");
   const serverName = defaultServerName;
   const apiBaseUrl = defaultApiBaseUrl;
-  const [selectedNode, setSelectedNode] = useState(null);
   const [editData, setEditData] = useState(null);
   const [run, setRun] = useState(null);
   const [activeRunId, setActiveRunId] = useState(null);
@@ -1394,6 +1393,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const [isReplayDialogOpen, setIsReplayDialogOpen] = useState(false);
   const openInputRef = useRef(null);
   const subMenuRef = useRef(null);
+  const contextMenuRef = useRef(null);
   const reactFlowRef = useRef(null);
   const replayRequestRef = useRef(0);
   const graphRef = useRef({ nodes: initialNodes, edges: initialEdges });
@@ -1401,8 +1401,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const canvasRef = useRef(null);
   const isCanvasFocusedRef = useRef(false);
   const graphClipboardRef = useRef(null);
-  const selectedNodeIdsRef = useRef([]);
-  const selectedEdgeIdsRef = useRef([]);
   const pointerPositionRef = useRef(null);
   const bottomPanelDragRef = useRef(null);
 
@@ -1423,11 +1421,48 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     };
   }, []);
 
+  useEffect(() => {
+    const closeContextMenuOutside = (event) => {
+      if (!contextMenuRef.current?.contains(event.target)) {
+        setContextMenu(null);
+      }
+    };
+    document.addEventListener("pointerdown", closeContextMenuOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeContextMenuOutside, true);
+    };
+  }, []);
+
   const suppressNextEdgeHistoryRef = useRef(false);
   const nodeMoveHistoryRef = useRef(null);
   const viewNodeDataRef = useRef(null);
 
   graphRef.current = { nodes, edges };
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => node.selected),
+    [nodes],
+  );
+  const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
+
+  const clearNodeSelection = useCallback(() => {
+    const nextNodes = graphRef.current.nodes.map((node) =>
+      node.selected ? { ...node, selected: false } : node,
+    );
+    graphRef.current = { ...graphRef.current, nodes: nextNodes };
+    setNodes(nextNodes);
+  }, [setNodes]);
+
+  const selectOnlyNode = useCallback(
+    (nodeId) => {
+      const nextNodes = graphRef.current.nodes.map((node) => ({
+        ...node,
+        selected: node.id === nodeId,
+      }));
+      graphRef.current = { ...graphRef.current, nodes: nextNodes };
+      setNodes(nextNodes);
+    },
+    [setNodes],
+  );
 
   const getCurrentViewport = useCallback(() => {
     const viewport =
@@ -1508,7 +1543,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       setConcertFileLabel(tab.concertFileLabel);
       setConcertFileHandle(tab.concertFileHandle || null);
       setVersion(tab.version || "");
-      setNodes(cloneValue(tab.nodes || []));
+      setNodes(
+        cloneValue(tab.nodes || []).map((node) => ({
+          ...node,
+          selected: false,
+        })),
+      );
       setEdges((tab.edges || []).map(normalizeEdge));
       setGlobalVariables(cloneValue(tab.globalVariables || []));
       setInputVariables(cloneValue(tab.inputVariables || []));
@@ -1540,9 +1580,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
             : "output",
       );
       setIsDirty(Boolean(tab.isDirty));
-      selectedNodeIdsRef.current = [];
-      selectedEdgeIdsRef.current = [];
-      setSelectedNode(null);
       setEditData(null);
       setSearchHighlight(null);
       setContextMenu(null);
@@ -1629,7 +1666,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         setActiveTabId(null);
         setIsTabOpen(false);
         setIsDirty(false);
-        setSelectedNode(null);
         setEditData(null);
         setSearchHighlight(null);
         setContextMenu(null);
@@ -1689,7 +1725,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       setEdges(restoredGraph.edges);
       setGlobalVariables(cloneValue(snapshot.globalVariables));
       setInputVariables(cloneValue(snapshot.inputVariables));
-      setSelectedNode(null);
       setEditData(null);
       setSearchHighlight(null);
       setContextMenu(null);
@@ -2140,7 +2175,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       setGlobalVariables([]);
       setInputVariables([]);
       setRunParamValues({});
-      setSelectedNode(null);
       setEditData(null);
       setSearchHighlight(null);
       setContextMenu(null);
@@ -2332,20 +2366,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const fragment = selectedGraphFragment(
       currentNodes,
       currentEdges,
-      selectedNodeIdsRef.current,
+      currentNodes.filter((node) => node.selected).map((node) => node.id),
     );
     if (!fragment) return false;
     graphClipboardRef.current = cloneValue(fragment);
     return true;
   }, [edges, nodes]);
-
-  const onSelectionChange = useCallback(
-    ({ nodes: selectedNodes, edges: selectedEdges }) => {
-      selectedNodeIdsRef.current = selectedNodes.map((node) => node.id);
-      selectedEdgeIdsRef.current = selectedEdges.map((edge) => edge.id);
-    },
-    [],
-  );
 
   const pasteGraph = useCallback(() => {
     const fragment = graphClipboardRef.current;
@@ -2399,9 +2425,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     graphRef.current = { nodes: nextNodes, edges: nextEdges };
     setNodes(nextNodes);
     setEdges(nextEdges);
-    setSelectedNode(newNodes[0] || null);
-    selectedNodeIdsRef.current = newNodes.map((node) => node.id);
-    selectedEdgeIdsRef.current = [];
     setEditData(null);
     setSearchHighlight(null);
     setContextMenu(null);
@@ -2568,15 +2591,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (isSelectAllShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        selectedNodeIdsRef.current = nodes.map((node) => node.id);
-        selectedEdgeIdsRef.current = edges.map((edge) => edge.id);
         setNodes((currentNodes) =>
           currentNodes.map((node) => ({ ...node, selected: true })),
         );
         setEdges((currentEdges) =>
           currentEdges.map((edge) => ({ ...edge, selected: true })),
         );
-        setSelectedNode(null);
         setEditData(null);
         setSearchHighlight(null);
         setContextMenu(null);
@@ -2628,7 +2648,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           setIsSaveChangesDialogOpen(true);
           return;
         }
-        setSelectedNode(null);
+        clearNodeSelection();
         setEditData(null);
         setSearchHighlight(null);
         setContextMenu(null);
@@ -2638,6 +2658,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
+    clearNodeSelection,
     copySelectedGraph,
     edges,
     editData,
@@ -2845,7 +2866,18 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const handleNodesChange = useCallback(
     (changes) => {
       const positionChanges = changes.filter((change) => change.type === "position");
-      if (positionChanges.length && !nodeMoveHistoryRef.current) {
+      const hasActualPositionChange = positionChanges.some((change) => {
+        if (!change.position) return false;
+        const currentNode = graphRef.current.nodes.find(
+          (node) => node.id === change.id,
+        );
+        return (
+          currentNode &&
+          (currentNode.position?.x !== change.position.x ||
+            currentNode.position?.y !== change.position.y)
+        );
+      });
+      if (hasActualPositionChange && !nodeMoveHistoryRef.current) {
         nodeMoveHistoryRef.current = stateForHistory(graphRef.current, globalVariables, inputVariables);
       }
       const removedNodeIds = changes
@@ -2871,7 +2903,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const nextNodes = applyNodeChanges(changes, graphRef.current.nodes);
       graphRef.current = { ...graphRef.current, nodes: nextNodes };
       setNodes(nextNodes);
-      if (positionChanges.some((change) => change.dragging !== true)) {
+      if (
+        nodeMoveHistoryRef.current &&
+        positionChanges.some((change) => change.dragging !== true)
+      ) {
         pushHistory("Move nodes", nodeMoveHistoryRef.current);
         nodeMoveHistoryRef.current = null;
       }
@@ -3016,16 +3051,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [updateSearchHeight]);
 
   const closeEditor = useCallback(() => {
-    setSelectedNode(null);
+    clearNodeSelection();
     setEditData(null);
     setSearchHighlight(null);
     setIsSaveChangesDialogOpen(false);
-  }, []);
+  }, [clearNodeSelection]);
 
   const openEditor = (_, node) => {
     setContextMenu(null);
     setIsSaveChangesDialogOpen(false);
-    setSelectedNode(node);
+    selectOnlyNode(node.id);
     setEditData(editableNodeData(node));
     setSearchHighlight(null);
   };
@@ -3047,7 +3082,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       centerOptions,
     );
 
-    const selectedTarget = { ...target, selected: true };
     setNodes((currentNodes) =>
       currentNodes.map((node) => ({
         ...node,
@@ -3056,7 +3090,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     );
     setContextMenu(null);
     setIsSaveChangesDialogOpen(false);
-    setSelectedNode(selectedTarget);
     if (action !== "open") {
       setEditData(null);
       setSearchHighlight(null);
@@ -3083,7 +3116,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const target = nodes.find((node) => node.id === nodeId);
     if (!target) return;
 
-    const selectedTarget = { ...target, selected: true };
     setNodes((currentNodes) =>
       currentNodes.map((node) => ({
         ...node,
@@ -3092,7 +3124,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     );
     setContextMenu(null);
     setIsSaveChangesDialogOpen(false);
-    setSelectedNode(selectedTarget);
     setSearchHighlight(null);
 
     if (["dbRead", "python", "opl", "dbWrite", "concert", "concertInput", "cacheRead", "cacheWrite", "fileRead", "fileWrite", "loopIn", "loopOut"].includes(target.type)) {
@@ -3197,13 +3228,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         node.id === selectedNode.id
           ? {
               ...node,
+              selected: false,
               data: {
                 ...node.data,
                 ...nextEditData,
                 name: nodeName,
               },
             }
-          : node,
+          : node.selected
+            ? { ...node, selected: false }
+            : node,
       );
     const nextEdges = edges;
     const changed = hasChanges;
@@ -3234,70 +3268,41 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const onNodeContextMenu = (event, node) => {
     event.preventDefault();
-    setSelectedNode(node);
+    selectOnlyNode(node.id);
     setContextMenu({ node, x: event.clientX, y: event.clientY });
   };
-
-  const mergeNodeResult = useCallback((nodeId, nodeResult) => {
-    setRun((currentRun) => {
-      if (!currentRun) return currentRun;
-      const currentNode = currentRun.nodes?.[nodeId] || {};
-      return {
-        ...currentRun,
-        nodes: {
-          ...(currentRun.nodes || {}),
-          [nodeId]: {
-            ...currentNode,
-            ...nodeResult,
-          },
-        },
-      };
-    });
-  }, []);
 
   const viewNodeData = useCallback(
     async (node) => {
       const existingNodeRun = run?.nodes?.[node.id];
       const runId = lastRunId || run?.id;
-      const dataUrl = runId
-        ? `${apiBaseUrl}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node.id)}/data`
-        : "";
-      if (existingNodeRun?.result) {
-        openDataWindow(node, existingNodeRun, null, { dataUrl });
-        return;
-      }
-
       if (!runId) {
         openDataWindow(node, existingNodeRun);
         return;
       }
-
+      const queryUrl = `${apiBaseUrl}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node.id)}/data/query`;
       try {
-        const response = await fetch(
-          `${apiBaseUrl}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node.id)}/data`,
-        );
-        if (!response.ok) {
-          openDataWindow(node, {
-            ...(existingNodeRun || {}),
-            error: await response.text(),
-          });
-          return;
-        }
+        const response = await fetch(queryUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset: 0, limit: 1000 }),
+        });
+        if (!response.ok) throw new Error(await response.text());
         const body = await response.json();
-        const nextNodeRun = {
-          ...(existingNodeRun || {}),
-          result: body.result,
-        };
-        mergeNodeResult(node.id, nextNodeRun);
-        openDataWindow(node, nextNodeRun, null, { dataUrl });
+        openDataWindow(
+          node,
+          { ...(existingNodeRun || {}), result: body.result },
+          null,
+          { apiMode: true, queryUrl },
+        );
       } catch (error) {
         openDataWindow(node, {
           ...(existingNodeRun || {}),
-          error: `Load data failed: ${error.message}`,
+          error: `Load API data failed: ${error.message}`,
         });
       }
     },
-    [apiBaseUrl, lastRunId, mergeNodeResult, run],
+    [apiBaseUrl, lastRunId, run],
   );
   viewNodeDataRef.current = viewNodeData;
 
@@ -3417,7 +3422,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setLastRunId(null);
     setRunCompleteTiming(null);
     setPendingRun(null);
-    setSelectedNode(null);
     setEditData(null);
     setSearchHighlight(null);
     setContextMenu(null);
@@ -3822,17 +3826,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                     onEdgesChange={handleEdgesChange}
                     onConnect={onConnect}
                     onNodeDoubleClick={openEditor}
-                    onNodeClick={(_, node) => {
-                      setSelectedNode(node);
-                      setSearchHighlight(null);
-                    }}
+                    onNodeClick={() => setSearchHighlight(null)}
                     onNodeContextMenu={onNodeContextMenu}
-                    onSelectionChange={onSelectionChange}
                     onMoveEnd={onViewportMoveEnd}
                     onMouseMove={updatePointerPosition}
                     onPaneClick={() => {
                       setContextMenu(null);
-                      setSelectedNode(null);
+                      clearNodeSelection();
                     }}
                     nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
@@ -3853,7 +3853,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                     selectionMode={SelectionMode.Full}
                     onlyRenderVisibleElements
                     minZoom={0.1}
-                    fitView
                   >
                     <Background variant="lines" gap={100} size={1} />
                     <Controls />
@@ -3937,6 +3936,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
       <ContextMenu
         menu={contextMenu}
+        menuRef={contextMenuRef}
         onViewData={(node) => {
           void viewNodeData(node);
           setContextMenu(null);

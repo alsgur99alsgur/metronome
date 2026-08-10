@@ -803,7 +803,7 @@ button:disabled {
 .concert-output-header {
   height: 54px;
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) 32px;
+  grid-template-columns: auto minmax(0, 1fr) 32px;
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid #eef1f4;
@@ -983,8 +983,8 @@ button:disabled {
 }
 
 .palette-node {
-  width: 54px;
-  height: 54px;
+  width: 58px;
+  height: 58px;
   border: 2px solid;
   border-radius: 8px;
   color: #334155;
@@ -3408,8 +3408,8 @@ th {
   }
 
   .palette-node {
-    width: 48px;
-    height: 48px;
+    width: 52px;
+    height: 52px;
   }
 
   .palette-label {
@@ -3588,16 +3588,16 @@ button {
   gap: 1px;
 }
 
-.palette-node {
-  width: 30px;
-  height: 30px;
+  .palette-node {
+    width: 34px;
+    height: 34px;
   border-width: 1px;
   border-radius: 4px;
   box-shadow: none;
 }
 
-.palette-node svg {
-  font-size: 17px;
+  .palette-node svg {
+    font-size: 19px;
 }
 
 .palette-label {

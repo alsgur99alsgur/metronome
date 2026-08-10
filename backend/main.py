@@ -140,6 +140,31 @@ class SchemaInferRequest(BaseModel):
     startNodeId: Optional[str] = None
 
 
+class DataFilterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column: str
+    operator: str
+    value: str = ""
+
+
+class DataSortRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column: str
+    direction: str
+
+
+class DataQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=1000, ge=1, le=5000)
+    search: str = ""
+    filters: list[DataFilterRequest] = Field(default_factory=list)
+    sorts: list[DataSortRequest] = Field(default_factory=list)
+
+
 class StageResourceRequest(BaseModel):
     kind: str
     name: str
@@ -1267,6 +1292,36 @@ def get_run_node_data(
         }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/runs/{run_id}/nodes/{node_id}/data/query")
+def query_run_node_data(run_id: str, node_id: str, req: DataQueryRequest):
+    cache_id = run_id
+    with runs_lock:
+        if run_id in runs:
+            run_state = runs[run_id]
+            if node_id not in run_state.get("nodes", {}):
+                raise HTTPException(status_code=404, detail="node not found")
+            cache_id = run_state.get("cache", {}).get("cacheId") or run_id
+    try:
+        return {
+            "runId": run_id,
+            "nodeId": node_id,
+            "result": CacheDataStore.query_node_result(
+                REPLAY_ROOT,
+                cache_id,
+                node_id,
+                offset=req.offset,
+                limit=req.limit,
+                search=req.search,
+                filters=[item.model_dump() for item in req.filters],
+                sorts=[item.model_dump() for item in req.sorts],
+            ),
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/opl/model", response_class=PlainTextResponse)

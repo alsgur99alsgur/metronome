@@ -4,12 +4,13 @@ const path = require("node:path");
 module.exports = async function afterPack(context) {
   if (context.electronPlatformName !== "win32") return;
 
-  const adminLauncher = path.join(context.appOutDir, "metronome_admin.cmd");
-  fs.writeFileSync(
-    adminLauncher,
-    '@echo off\r\nstart "" "%~dp0metronome.exe" --admin\r\n',
-    "utf8",
-  );
+  const launchers = {
+    "metronome.cmd": '@echo off\r\nstart "" "%~dp0electron.exe"\r\n',
+    "metronome_admin.cmd": '@echo off\r\nstart "" "%~dp0electron.exe" --admin\r\n',
+  };
+  for (const [name, contents] of Object.entries(launchers)) {
+    fs.writeFileSync(path.join(context.appOutDir, name), contents, "utf8");
+  }
 
   const serversPath = path.join(context.appOutDir, "servers.json");
   fs.writeFileSync(

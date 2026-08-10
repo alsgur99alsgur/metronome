@@ -5,7 +5,7 @@
 `backend`는 FastAPI API, Concert graph 실행기, 저장소, Timer를 함께 제공한다.
 
 - `main.py`: FastAPI app, Pydantic request 모델, route, run state/queue
-- `desktop_backend.py`: 데스크톱 데이터 파일 초기화, Uvicorn 실행, token-protected shutdown
+- `desktop_backend.py`: 백엔드 데이터 파일 초기화, 선택적 Windows 콘솔 할당, Uvicorn 실행
 - `app_config.py`: `config.json` 로드와 기본값 merge
 - `json_serialization.py`: runtime datetime/date/time과 scalar의 JSON 저장 변환
 
@@ -43,6 +43,7 @@ Concert JSON persistence와 ID/name 검증은 `concert_store.py`가 담당한다
 
 - `POST /run`
 - `GET /runs/{run_id}`와 node data
+- `POST /runs/{run_id}/nodes/{node_id}/data/query`: 런 캐시 결과를 서버에서 필터·다중 정렬하고 offset/limit 페이지로 반환
 - `POST /runs/{run_id}/cancel`
 - `GET /opl/model`
 - `GET /replays`, `GET|DELETE /replays/cache`
@@ -139,8 +140,11 @@ Concert/노드 이름은 `^[A-Za-z0-9_]+$`이며 누락·불일치 payload는 �
 
 `config.json`:
 
+- `backend.consoleMode`: Windows 백엔드 콘솔 표시 여부 (`true`/`false`)
 - `oracle.poolMin`, `poolMax`, `poolIncrement`, `writeBatchSize`
 - `executor.workers`, `timeoutSeconds`
+
+백엔드는 프런트 및 Admin 프런트와 독립적으로 실행·종료한다. 두 UI를 닫아도 백엔드는 종료되지 않으며, 백엔드도 UI 프로세스를 제어하지 않는다.
 
 `servers.json`에는 정확히 하나의 `Local` 항목이 필요하다. `connections.json`은 Oracle 연결 설정, `connection_schema_cache.json`은 describe 실패 시 사용할 schema cache다.
 

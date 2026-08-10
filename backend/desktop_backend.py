@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 import sys
@@ -15,6 +16,9 @@ def _initialize_data_directory():
 
     defaults = {
         "config.json": {
+            "backend": {
+                "consoleMode": False,
+            },
             "oracle": {
                 "poolMin": 1,
                 "poolMax": 4,
@@ -43,6 +47,24 @@ def _initialize_data_directory():
     return data_root
 
 
+def _configure_console(data_root):
+    config = json.loads((data_root / "config.json").read_text(encoding="utf-8"))
+    backend_config = config.get("backend", {})
+    if not isinstance(backend_config, dict):
+        raise ValueError("config.json backend must be an object.")
+    console_mode = backend_config.get("consoleMode", False)
+    if type(console_mode) is not bool:
+        raise ValueError("config.json backend.consoleMode must be a boolean.")
+    if not console_mode or sys.platform != "win32":
+        return
+
+    if not ctypes.windll.kernel32.AllocConsole():
+        raise OSError("Failed to allocate the backend console.")
+    sys.stdin = open("CONIN$", "r", encoding="utf-8")
+    sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+    sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+
+
 def _local_server_port(data_root):
     servers = json.loads((data_root / "servers.json").read_text(encoding="utf-8"))
     if not isinstance(servers, list):
@@ -58,30 +80,13 @@ def _local_server_port(data_root):
 
 if __name__ == "__main__":
     data_root = _initialize_data_directory()
+    _configure_console(data_root)
     local_port = _local_server_port(data_root)
 
     import uvicorn
-    from fastapi import Header, HTTPException
     from main import app
 
-    shutdown_token = os.environ.get("METRONOME_SHUTDOWN_TOKEN")
     server = uvicorn.Server(
         uvicorn.Config(app, host="0.0.0.0", port=local_port, log_level="info")
     )
-
-    def require_desktop_token(token):
-        if not shutdown_token or token != shutdown_token:
-            raise HTTPException(status_code=403, detail="Invalid desktop token.")
-
-    @app.get("/desktop/health", include_in_schema=False)
-    def desktop_health(x_metronome_token: str = Header(default="")):
-        require_desktop_token(x_metronome_token)
-        return {"status": "ok"}
-
-    @app.post("/desktop/shutdown", include_in_schema=False)
-    def desktop_shutdown(x_metronome_token: str = Header(default="")):
-        require_desktop_token(x_metronome_token)
-        server.should_exit = True
-        return {"status": "stopping"}
-
     server.run()

@@ -1,0 +1,33 @@
+.data-viewer-document,
+.data-viewer-document body,
+.data-viewer-document #root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+.viewer, .viewer * { box-sizing: border-box; }
+.viewer { display: grid; grid-template-rows: 42px minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; color: #111827; background: #f8fafc; font: 11px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; overflow: hidden; }
+.viewer > header { min-width: 0; height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 7px; border-bottom: 1px solid #d7dce2; background: #fff; overflow: hidden; }
+.viewer h1 { margin: 0; font-size: 13px; }.viewer .sub { color: #64748b; font-size: 10px; }.viewer .tools { display: flex; align-items: center; gap: 4px; }
+.viewer input, .viewer select, .viewer button { height: 24px; border: 1px solid #cbd5e1; border-radius: 3px; background: #fff; padding: 0 5px; font: inherit; }
+.viewer button { cursor: pointer; font-weight: 700; }.viewer .tools > input { width: 210px; }.viewer .load-error { max-width: 220px; overflow: hidden; color: #b91c1c; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.viewer > main { min-width: 0; min-height: 0; display: grid; grid-template-columns: 180px minmax(0, 1fr); overflow: hidden; }
+.viewer aside { min-height: 0; overflow: auto; overscroll-behavior: contain; border-right: 1px solid #d7dce2; background: #fff; padding: 5px; }.viewer .column-title { margin-bottom: 4px; color: #475569; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.viewer .column-toggle { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 4px; height: 20px; }.viewer .column-toggle input { width: 12px; height: 12px; margin: 0; }.viewer .column-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer .column-toggle-all { position: sticky; top: -5px; z-index: 1; height: 27px; margin: 0 -5px 3px; padding: 3px 5px; border-bottom: 1px solid #d7dce2; background: #f8fafc; font-weight: 800; }
+.viewer .grid-pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.viewer .grid { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; background: #fff; contain: strict; }.viewer .canvas { position: relative; }.viewer .corner, .viewer .column-header, .viewer .row-number, .viewer .cell { position: absolute; top: 0; left: 0; border-right: 1px solid #e5eaf0; border-bottom: 1px solid #e5eaf0; background: #fff; }
+.viewer .active-criteria { position: absolute; right: 14px; bottom: 14px; z-index: 6; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: calc(100% - 28px); max-height: 96px; overflow: auto; padding: 7px; border: 1px solid #cbd5e1; border-radius: 7px; background: rgb(255 255 255 / 94%); box-shadow: 0 5px 18px rgb(15 23 42 / 18%); backdrop-filter: blur(4px); }
+.viewer .criterion { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; max-width: 360px; overflow: hidden; padding: 3px 7px; border: 1px solid #dbe3ec; border-radius: 999px; background: #f8fafc; text-overflow: ellipsis; white-space: nowrap; }
+.viewer .criterion.sorting { border-color: #bfdbfe; background: #eff6ff; color: #1e40af; }
+.viewer .criterion.filtering { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.viewer .remove-criterion { flex: 0 0 auto; width: 18px; height: 18px; margin: 0 -3px 0 2px; border: 0; border-radius: 50%; background: transparent; color: currentColor; padding: 0; font-size: 15px; line-height: 16px; }
+.viewer .remove-criterion:hover { background: rgb(15 23 42 / 10%); }
+.viewer .corner { z-index: 4; width: 52px; height: 57px; padding: 7px 6px; color: #64748b; text-align: right; background: #f1f5f9; font-weight: 800; }
+.viewer .column-header { z-index: 3; width: 180px; height: 57px; padding: 4px; background: #f1f5f9; }.viewer .sort { display: block; width: 100%; height: 22px; overflow: hidden; border: 0; background: transparent; padding: 0 2px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.viewer .filter { display: grid; grid-template-columns: 72px 1fr; gap: 3px; }.viewer .filter select, .viewer .filter input { min-width: 0; width: 100%; height: 23px; font-size: 10px; }
+.viewer .row-number { z-index: 2; width: 52px; height: 25px; padding: 5px 6px; color: #64748b; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.viewer .cell { width: 180px; height: 25px; overflow: hidden; padding: 5px 6px; text-overflow: ellipsis; white-space: nowrap; user-select: none; }.viewer .cell.selected { background: #dbeafe; box-shadow: inset 0 0 0 1px #60a5fa; }
+.viewer .error, .fatal { margin: 8px; border: 1px solid #fecaca; border-radius: 3px; background: #fff1f2; color: #991b1b; padding: 8px; white-space: pre-wrap; }

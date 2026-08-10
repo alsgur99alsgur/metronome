@@ -9,7 +9,7 @@
 - `src/styles.css`: 전체 admin UI 스타일
 - `vite.config.js`: Vite 설정
 
-Electron은 `--admin` 인자로 실행될 때 백엔드를 새로 시작하지 않고, 패키지의 `admin-dist/index.html`을 열어 기존 Local 서버에 연결한다.
+패키지의 `metronome_admin.cmd`는 공용 `electron.exe`를 `--admin` 인자로 실행해 `admin-dist/index.html`을 연다. Admin 프런트는 백엔드 상태와 무관하게 시작하며 백엔드 프로세스를 시작·종료하지 않는다. 서버 연결 여부는 열린 UI 안에서만 확인한다.
 
 ## App structure
 
