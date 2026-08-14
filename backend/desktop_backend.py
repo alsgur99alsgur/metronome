@@ -20,7 +20,7 @@ def _initialize_data_directory():
     defaults = {
         "config.json": {
             "backend": {
-                "consoleMode": False,
+                "consoleMode": True,
             },
             "oracle": {
                 "poolMin": 1,
@@ -31,6 +31,7 @@ def _initialize_data_directory():
             "executor": {
                 "workers": 3,
                 "timeoutSeconds": 60,
+                "nodeLogLimitKb": 1024,
             },
             "storage": {
                 "retentionDays": 7,
@@ -57,7 +58,7 @@ def _initialize_data_directory():
 def _configure_console(data_root):
     from app_config import load_config
 
-    console_mode = load_config().get("backend", {}).get("consoleMode", False)
+    console_mode = load_config().get("backend", {}).get("consoleMode", True)
     if type(console_mode) is not bool:
         raise ValueError("config.json backend.consoleMode must be a boolean.")
     if sys.platform != "win32":
@@ -65,13 +66,16 @@ def _configure_console(data_root):
     kernel32 = ctypes.windll.kernel32
     user32 = ctypes.windll.user32
     console_window = kernel32.GetConsoleWindow()
-    if console_mode and not console_window:
+    if not console_window:
         if not kernel32.AllocConsole():
             raise OSError("Failed to allocate the backend console.")
-        sys.stdin = open("CONIN$", "r", encoding="utf-8")
-        sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
-        sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
         console_window = kernel32.GetConsoleWindow()
+    if sys.stdin is None:
+        sys.stdin = open("CONIN$", "r", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+    if sys.stderr is None:
+        sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
     if console_window:
         user32.ShowWindow(console_window, 5 if console_mode else 0)
 
@@ -86,7 +90,7 @@ def _watch_console_mode(data_root):
             try:
                 from app_config import load_config
 
-                current = load_config().get("backend", {}).get("consoleMode", False)
+                current = load_config().get("backend", {}).get("consoleMode", True)
                 if current != previous:
                     _configure_console(data_root)
                     previous = current

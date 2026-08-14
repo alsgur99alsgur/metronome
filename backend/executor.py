@@ -1,7 +1,5 @@
-from contextlib import redirect_stderr, redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from io import StringIO
 from queue import Queue
 from threading import BoundedSemaphore, Event, Lock, Thread
 import os
@@ -16,6 +14,7 @@ import pyarrow.parquet as pq
 from app_config import config_int
 from replay_data_store import ReplayDataStore
 from task import Task
+from thread_local_output import CappedTextBuffer, capture_thread_output
 
 
 class TaskTimeout(Exception):
@@ -42,6 +41,9 @@ class Executor:
         save_loop_snapshots=True,
         capture_task_output=True,
         loop_thread_semaphore=None,
+        stdout_router=None,
+        stderr_router=None,
+        node_log_limit_bytes=None,
     ):
         self.queue = Queue()
         self.replay_data_store = replay_data_store
@@ -60,6 +62,15 @@ class Executor:
         self.worker_threads = []
         self.save_loop_snapshots = save_loop_snapshots
         self.capture_task_output = capture_task_output
+        self.stdout_router = stdout_router
+        self.stderr_router = stderr_router
+        self.node_log_limit_bytes = (
+            node_log_limit_bytes
+            if node_log_limit_bytes is not None
+            else config_int("executor", "nodeLogLimitKb") * 1024
+        )
+        if self.node_log_limit_bytes < 1024:
+            raise ValueError("executor.nodeLogLimitKb must be at least 1.")
         self.loop_thread_semaphore = loop_thread_semaphore or BoundedSemaphore(
             max(1, self.workers)
         )
@@ -107,19 +118,26 @@ class Executor:
     def execute_with_timeout(self, task, inputs):
         result_container = {}
         error_container = {}
-        output = StringIO()
+        output = CappedTextBuffer(self.node_log_limit_bytes)
         done = Event()
 
         def run():
             try:
                 if self.capture_task_output:
-                    with redirect_stdout(output), redirect_stderr(output):
+                    if self.stdout_router is None or self.stderr_router is None:
+                        raise RuntimeError("Thread-local output routers are not installed.")
+                    with capture_thread_output(
+                        self.stdout_router,
+                        self.stderr_router,
+                        output,
+                    ):
                         result_container["result"] = task.execute(inputs)
                 else:
                     result_container["result"] = task.execute(inputs)
             except Exception as exc:
                 error_container["error"] = exc
-                error_container["traceback"] = traceback.format_exc()
+                output.write(traceback.format_exc())
+                error_container["traceback"] = output.getvalue()
             finally:
                 done.set()
 
@@ -490,8 +508,11 @@ class Executor:
             runnable_task_ids=self.runnable_task_ids,
             cancel_event=self.cancel_event,
             save_loop_snapshots=False,
-            capture_task_output=False,
+            capture_task_output=self.capture_task_output,
             loop_thread_semaphore=self.loop_thread_semaphore,
+            stdout_router=self.stdout_router,
+            stderr_router=self.stderr_router,
+            node_log_limit_bytes=self.node_log_limit_bytes,
         )
         with self.lock:
             for body_task in task.loop_body_tasks:

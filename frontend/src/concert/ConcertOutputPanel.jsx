@@ -71,13 +71,14 @@ export default function ConcertOutputPanel({
         .filter((node) => outputNodeTypes.has(node.type))
         .map((node) => {
           const nodeRun = run?.nodes?.[node.id];
-          const status = nodeRun?.status || node.data?.status || "idle";
+          const status = nodeRun?.status || node.data?.status || "skipped";
           const duration = nodeRun?.durationMs ?? node.data?.runDurationMs;
           const result = nodeRun?.result;
           const cacheSummary = nodeRun?.rows != null
             ? `${nodeRun.rows} rows / ${(nodeRun.columns || []).length} columns`
             : "";
           const detail = nodeRun?.error || nodeRun?.logs || cacheSummary || resultSummary(result) || "";
+          const fullDetail = nodeRun?.logs || nodeRun?.error || cacheSummary || resultSummary(result) || "";
 
           return {
             id: node.id,
@@ -86,13 +87,13 @@ export default function ConcertOutputPanel({
             status,
             duration,
             detail,
+            fullDetail,
             error: nodeRun?.error || "",
             logs: nodeRun?.logs || "",
             result,
           };
-        })
-        .filter((row) => row.status !== "idle" || row.detail || row.id === selectedNode?.id),
-    [nodes, run, selectedNode],
+        }),
+    [nodes, run],
   );
 
   const selectedOutput = selectedNode
@@ -135,8 +136,9 @@ export default function ConcertOutputPanel({
               <button
                 className={`concert-output-row ${selectedNode?.id === row.id ? "selected" : ""}`}
                 key={row.id}
-                onDoubleClick={() => onOpenNode(row.id)}
-                title="Double click to open"
+                onClick={() => onOpenNode(row.id, "move")}
+                onDoubleClick={() => onOpenNode(row.id, "open")}
+                title="Click to go, double click to open editor"
               >
                 <span className={`status-dot ${row.status}`} />
                 <span className="concert-output-node">{row.name}</span>
@@ -159,7 +161,7 @@ export default function ConcertOutputPanel({
             <>
               <div className="result-title">{selectedOutput.name}</div>
               <pre className={selectedOutput.error ? "error-text" : ""}>
-                {selectedOutput.detail || "No output for this node."}
+                {selectedOutput.fullDetail || "No output for this node."}
               </pre>
             </>
           ) : (

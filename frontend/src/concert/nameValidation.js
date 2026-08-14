@@ -14,6 +14,8 @@ export const validateConcertName = (value) => validateName(value, "Concert name"
 
 export const validateNodeName = (value) => validateName(value, "Node name");
 
+export const validateCacheName = (value) => validateName(value, "Cache name");
+
 export const validateConcertPath = (value) => {
   const path = String(value ?? "").replace(/\\/g, "/");
   if (!path || path.startsWith("/") || path.endsWith("/")) {

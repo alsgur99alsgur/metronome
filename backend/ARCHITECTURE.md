@@ -8,8 +8,11 @@
 - `desktop_backend.py`: 백엔드 데이터 파일 초기화, 선택적 Windows 콘솔 할당, Uvicorn 실행
 - `app_config.py`: `config.json` 로드와 기본값 merge
 - `json_serialization.py`: runtime datetime/date/time과 scalar의 JSON 저장 변환
+- `thread_local_output.py`: 병렬 node별 stdout/stderr 라우팅과 byte 제한
 
 데이터 루트는 `METRONOME_DATA_DIR`이며 미설정 시 `backend` 디렉터리다.
+노드 로그 제한은 `config.json`의 `executor.nodeLogLimitKb`이며 기본값은
+1024 KB다. 제한을 넘은 출력은 truncation marker 이후 버린다.
 
 ## API groups
 

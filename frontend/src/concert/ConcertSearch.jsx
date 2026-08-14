@@ -139,9 +139,11 @@ export default function ConcertSearch({
   showResizer = true,
   height,
   onHeightChange,
+  inputTerm,
+  submittedTerm,
+  onInputTermChange,
+  onSubmittedTermChange,
 }) {
-  const [inputTerm, setInputTerm] = useState("");
-  const [submittedTerm, setSubmittedTerm] = useState("");
   const [localSearchHeight, setLocalSearchHeight] = useState(220);
   const dragStartRef = useRef(null);
   const searchHeight = height ?? localSearchHeight;
@@ -181,7 +183,7 @@ export default function ConcertSearch({
   }, [setSearchHeight]);
 
   const submitSearch = () => {
-    setSubmittedTerm(inputTerm.trim());
+    onSubmittedTermChange(inputTerm.trim());
   };
 
   const results = useMemo(() => {
@@ -220,7 +222,7 @@ export default function ConcertSearch({
           className="concert-search-input"
           value={inputTerm}
           placeholder="Search all node fields"
-          onChange={(event) => setInputTerm(event.target.value)}
+          onChange={(event) => onInputTermChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") submitSearch();
           }}

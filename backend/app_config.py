@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "executor": {
         "workers": 3,
         "timeoutSeconds": 60,
+        "nodeLogLimitKb": 1024,
     },
     "storage": {
         "retentionDays": 7,

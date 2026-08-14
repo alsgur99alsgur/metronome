@@ -70,12 +70,11 @@ export const nodeStyle = {
 };
 
 export const statusLabel = {
-  idle: "idle",
+  skipped: "skipped",
   pending: "pending",
   running: "running",
   success: "success",
   error: "error",
-  skipped: "skipped",
 };
 
 export const nodeIcon = {
@@ -94,7 +93,7 @@ export const nodeIcon = {
 };
 
 export default function Node({ data, type, selected }) {
-  const status = data.status || "idle";
+  const status = data.status || "skipped";
   const isConnectMode = Boolean(data.isConnectMode);
   const hasRunMeta = data.runRows != null || data.runDurationMs != null;
   const showLoopIterations =

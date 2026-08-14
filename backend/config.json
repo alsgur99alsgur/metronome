@@ -10,7 +10,8 @@
   },
   "executor": {
     "workers": 10,
-    "timeoutSeconds": 60
+    "timeoutSeconds": 60,
+    "nodeLogLimitKb": 1024
   },
   "storage": {
     "retentionDays": 7,

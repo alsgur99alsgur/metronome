@@ -19,6 +19,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from cache_data_store import CacheDataStore
+from concert_builder import selected_concert_graph
 from concert_store import ConcertStore
 from deployment_store import DeploymentMismatchError, DeploymentStore
 from oracle_client import (
@@ -905,10 +906,22 @@ def _queue_run(
     input_values = dict(params or {})
     run_timestamp = _run_timestamp()
     run_id = f"{concert_name}_{run_timestamp}"
+    selected_node_ids = {
+        node["id"] for node in concert["nodes"] if node.get("type") != "text"
+    }
+    if mode == "selected":
+        selected_nodes, _selected_edges = selected_concert_graph(
+            [node for node in concert["nodes"] if node.get("type") != "text"],
+            concert["edges"],
+            selected,
+        )
+        selected_node_ids = {node["id"] for node in selected_nodes}
     node_states = {
         node["id"]: {
             "id": node["id"], "name": node["data"]["name"], "type": node.get("type", ""),
-            "status": "pending", "logs": "", "error": None, "result": None,
+            "status": "pending" if node["id"] in selected_node_ids else "skipped",
+            "logs": "" if node["id"] in selected_node_ids else "Not included in the selected run.",
+            "error": None, "result": None,
             "durationMs": None, "cacheDurationMs": None, "loopIterations": None, "updatedAt": _now(),
         }
         for node in concert["nodes"] if node.get("type") != "text"
@@ -959,7 +972,8 @@ def _queue_run(
         name=f"concert-monitor-{run_id}", daemon=True,
     ).start()
     return {
-        "runId": run_id, "status": "queued", "replayId": None, "cacheId": None,
+        "runId": run_id, "status": "queued", "nodes": node_states,
+        "replayId": None, "cacheId": None,
         "executorId": EXECUTOR_ID, "replayRoot": os.path.abspath(REPLAY_ROOT),
     }
 

@@ -17,6 +17,7 @@ backend/.venv-build/
 
 backend/connections.json
 backend/replay/
+backend/stage/
 .env
 .env.*
 

@@ -49,7 +49,7 @@ import SaveChangesDialog from "./SaveChangesDialog";
 import VariablesDialog from "./VariablesDialog";
 import { coerceVariableValue } from "./variableTypes";
 import { nodeTypes } from "./nodeTypes";
-import { concertBaseName, validateConcertName, validateConcertPath, validateNodeName } from "./nameValidation";
+import { concertBaseName, validateCacheName, validateConcertName, validateConcertPath, validateNodeName } from "./nameValidation";
 import { useErrorDialog } from "../errors/ErrorDialog";
 
 const makeId = () => crypto.randomUUID();
@@ -172,7 +172,7 @@ const restoreCurrentRuntimeData = (snapshotNodes, currentNodes) => {
         delete data[key];
       }
     });
-    if (!Object.hasOwn(data, "status")) data.status = "idle";
+    if (!Object.hasOwn(data, "status")) data.status = "skipped";
     return { ...node, data };
   });
 };
@@ -208,6 +208,8 @@ const createBlankTab = () => ({
   viewport: { x: 0, y: 0, zoom: 1 },
   isSearchVisible: true,
   searchHeight: 220,
+  searchInputTerm: "",
+  searchSubmittedTerm: "",
   isOutputVisible: true,
   outputHeight: 220,
   activeBottomPanel: "output",
@@ -404,7 +406,7 @@ const executableGraph = (targetNodes, targetEdges) => {
 
 const createNode = (type, index, position) => {
   const name = `${({ dbRead: "db_read", dbWrite: "db_write" })[type] || type}_${index}`;
-  const data = { name, status: "idle" };
+  const data = { name, status: "skipped" };
 
   if (type === "dbRead") {
     data.connection = "";
@@ -1395,6 +1397,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const redoStackRef = useRef([]);
   const [isSearchVisible, setIsSearchVisible] = useState(true);
   const [searchHeight, setSearchHeight] = useState(220);
+  const [searchInputTerm, setSearchInputTerm] = useState("");
+  const [searchSubmittedTerm, setSearchSubmittedTerm] = useState("");
   const [isOutputVisible, setIsOutputVisible] = useState(true);
   const [outputHeight, setOutputHeight] = useState(220);
   const [activeBottomPanel, setActiveBottomPanel] = useState("search");
@@ -1520,6 +1524,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       viewport: cloneValue(viewportRef.current),
       isSearchVisible,
       searchHeight,
+      searchInputTerm,
+      searchSubmittedTerm,
       isOutputVisible,
       outputHeight,
       activeBottomPanel,
@@ -1550,6 +1556,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       runCompleteTiming,
       runParamValues,
       searchHeight,
+      searchInputTerm,
+      searchSubmittedTerm,
       isSearchVisible,
       selectedReplayId,
       undoStack,
@@ -1593,6 +1601,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const nextOutputVisible = tab.isOutputVisible ?? true;
       setIsSearchVisible(nextSearchVisible);
       setSearchHeight(tab.searchHeight || 220);
+      setSearchInputTerm(tab.searchInputTerm || "");
+      setSearchSubmittedTerm(tab.searchSubmittedTerm || "");
       setIsOutputVisible(nextOutputVisible);
       setOutputHeight(tab.outputHeight || 220);
       setActiveBottomPanel(
@@ -1876,7 +1886,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                   },
                 }
               : {}),
-            data: { ...node.data, status: "idle" },
+            data: { ...node.data, status: "skipped" },
           };
         }),
         edges: payload.edges.map(normalizeEdge),
@@ -2546,7 +2556,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (isSaveShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        void saveConcertLocal().catch((error) => showError(`Save Concert failed: ${error.message}`));
+        void saveConcertLocal().catch((error) => {
+          if (error?.name !== "AbortError") showError(`Save Concert failed: ${error.message}`);
+        });
         return;
       }
 
@@ -3214,27 +3226,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     );
   };
 
-  const openOutputNode = (nodeId) => {
-    const target = nodes.find((node) => node.id === nodeId);
-    if (!target) return;
-
-    setNodes((currentNodes) =>
-      currentNodes.map((node) => ({
-        ...node,
-        selected: node.id === nodeId,
-      })),
-    );
-    setContextMenu(null);
-    setIsSaveChangesDialogOpen(false);
-    setSearchHighlight(null);
-
-    if (["dbRead", "python", "opl", "dbWrite", "concert", "concertInput", "cacheRead", "cacheWrite", "loopIn", "loopOut"].includes(target.type)) {
-      setEditData(editableNodeData(target));
-    } else {
-      setEditData(null);
-    }
-  };
-
   const setBottomPanelState = (nextState) => {
     setIsSearchVisible(nextState.isSearchVisible);
     setIsOutputVisible(nextState.isOutputVisible);
@@ -3295,6 +3286,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     let nodeName;
     try {
       nodeName = validateNodeName(editData.name);
+      if (
+        ["cacheRead", "cacheWrite"].includes(selectedNode.type) &&
+        (editData.scope || "stage") === "concert"
+      ) {
+        validateCacheName(editData.resourceName);
+      }
     } catch (error) {
       showError(error.message);
       return;
@@ -3478,7 +3475,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
       const nodeRunStatus = run?.nodes?.[node.id]?.status;
       const hasCurrentCache = Boolean(
-        lastRunId && ["success", "skipped"].includes(nodeRunStatus),
+        lastRunId && nodeRunStatus === "success",
       );
       const query = new URLSearchParams({
         concertName: currentReplayConcertName,
@@ -3648,7 +3645,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           selected: false,
           data: {
             ...data,
-            status: "idle",
+            status: "skipped",
           },
         };
       }),
@@ -3710,7 +3707,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
             ...node,
             data: {
               ...node.data,
-              status: "pending",
+              status: mode === "selected" ? "skipped" : "pending",
               runRows: null,
               runDurationMs: null,
               runLoopIterations: null,
@@ -3793,6 +3790,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       });
       if (!response.ok) throw new Error(await responseErrorMessage(response));
       const body = await response.json();
+      setRun(body);
+      applyRunStateToNodes(body);
       setLastRunId(body.runId);
       setActiveRunId(body.runId);
     } catch (error) {
@@ -3853,7 +3852,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       openServerConcert,
       openDeploymentConcert,
       saveConcert: () => {
-        void saveConcertLocal().catch((error) => showError(`Save Concert failed: ${error.message}`));
+        void saveConcertLocal().catch((error) => {
+          if (error?.name !== "AbortError") showError(`Save Concert failed: ${error.message}`);
+        });
       },
       saveConcertAs: () => {
         void saveConcertAsLocal().catch((error) => {
@@ -4179,6 +4180,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                           showResizer={false}
                           height={searchHeight}
                           onHeightChange={updateSearchHeight}
+                          inputTerm={searchInputTerm}
+                          submittedTerm={searchSubmittedTerm}
+                          onInputTermChange={setSearchInputTerm}
+                          onSubmittedTermChange={setSearchSubmittedTerm}
                         />
                       )}
 
@@ -4188,7 +4193,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                           run={run}
                           selectedNode={selectedNode}
                           onClose={toggleOutputPanel}
-                          onOpenNode={openOutputNode}
+                          onOpenNode={(nodeId, action) => openSearchResult({ nodeId }, action)}
                           showClose={false}
                           showResizer={false}
                           height={searchHeight}
@@ -4222,7 +4227,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         canViewLp={Boolean(
           contextMenu?.node?.type === "opl" &&
           (selectedReplayId ||
-            (lastRunId && ["success", "skipped"].includes(run?.nodes?.[contextMenu.node.id]?.status)))
+            (lastRunId && run?.nodes?.[contextMenu.node.id]?.status === "success"))
         )}
         onViewLp={(node) => {
           setContextMenu(null);

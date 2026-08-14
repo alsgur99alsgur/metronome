@@ -11,6 +11,7 @@ from oracle_client import close_all_pools
 from replay_data_store import ReplayDataStore
 from resource_store import ResourceStore
 from variable_types import runtime_params
+from thread_local_output import install_thread_local_output, restore_thread_local_output
 
 
 class _NoReplayStore:
@@ -63,6 +64,9 @@ def run_concert_process(concert, input_variables):
     executor = None
     cache_store = None
     resource_store = ResourceStore(context["stageRoot"])
+    stdout_router, stderr_router, original_stdout, original_stderr = (
+        install_thread_local_output()
+    )
 
     def emit(kind, **payload):
         queue.put({"kind": kind, "runId": run_id, **payload})
@@ -81,7 +85,8 @@ def run_concert_process(concert, input_variables):
             if isinstance(item, dict)
             and str(item.get("name", "")).lstrip("$") in params
         }
-        nodes = [node for node in concert["nodes"] if node.get("type") != "text"]
+        all_nodes = [node for node in concert["nodes"] if node.get("type") != "text"]
+        nodes = all_nodes
         node_ids = {node["id"] for node in nodes}
         edges = [edge for edge in concert["edges"] if edge.get("source") in node_ids and edge.get("target") in node_ids]
         if context["mode"] == "selected":
@@ -196,6 +201,8 @@ def run_concert_process(concert, input_variables):
             on_event=on_event,
             runnable_task_ids=runnable_ids,
             cancel_event=cancel_event,
+            stdout_router=stdout_router,
+            stderr_router=stderr_router,
         )
         emit("started", pid=os.getpid(), cacheId=cache_id, replayId=output_replay_id)
         executor.start()
@@ -222,3 +229,4 @@ def run_concert_process(concert, input_variables):
             executor.shutdown()
         resource_store.cleanup_run(run_id)
         close_all_pools()
+        restore_thread_local_output(original_stdout, original_stderr)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { openDataWindow } from "./DataViewerWindow";
 import { useErrorDialog } from "../errors/ErrorDialog";
+import { validateCacheName } from "./nameValidation";
 
 const responseError = async (response) => {
   const body = await response.json().catch(() => null);
@@ -55,11 +56,18 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
   }, [apiBaseUrl]);
   useEffect(() => { load().catch((nextError) => setError(nextError.message)); }, [load]);
   const create = async () => {
+    let validatedName;
+    try {
+      validatedName = validateCacheName(name);
+    } catch (nextError) {
+      showError(nextError.message);
+      return;
+    }
     setBusy(true); setError("");
     try {
       const response = await fetch(`${apiBaseUrl}/stage-resources`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: validatedName }),
       });
       if (!response.ok) throw new Error(await responseError(response));
       setName(""); await load();

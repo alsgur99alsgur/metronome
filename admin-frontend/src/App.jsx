@@ -233,7 +233,7 @@ function SetTimerView({ server }) {
           <td onDoubleClick={() => editCell(row, "intervalUnit")}>{isEditing(row, "intervalUnit") ? <select value={row.intervalUnit} onChange={(event) => updateRow(row.id, { intervalUnit: event.target.value })} onBlur={() => !row.isNew && setEditing(null)}><option value="seconds">Seconds</option><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select> : row.intervalUnit}</td>
           <td onDoubleClick={() => editCell(row, "firstRunLocal")}>{isEditing(row, "firstRunLocal") ? <input type="datetime-local" step="1" value={row.firstRunLocal} onChange={(event) => updateRow(row.id, { firstRunLocal: event.target.value })} onBlur={() => !row.isNew && setEditing(null)} /> : new Date(row.firstRunLocal).toLocaleString()}</td>
           <td className="center-cell"><input type="checkbox" checked={row.enabled} onChange={(event) => updateRow(row.id, { enabled: event.target.checked })} /></td>
-          <td><span className={`status-badge${row.running ? " running" : ""}`}>{row.running ? "Running" : "Idle"}</span></td>
+          <td><span className={`status-badge${row.running ? " running" : ""}`}>{row.running ? "Running" : "Stopped"}</span></td>
           <td>{row.lastRunAt ? new Date(row.lastRunAt).toLocaleString() : "—"}</td><td>{row.lastDurationMs == null ? "—" : `${(row.lastDurationMs / 1000).toFixed(3)}s`}</td>
           <td><button className="danger-text-button" type="button" onClick={() => { setRows((current) => current.filter((item) => item.id !== row.id)); if (selectedId === row.id) setSelectedId(null); }}>Delete</button></td>
         </tr>)}</tbody></table></div>
