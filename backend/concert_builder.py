@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 
 from oracle_client import bind_names_from_sql, execute_oracle_query_records, execute_oracle_write_records
-from opl_builder import build_and_solve_opl
 from task import Task
 from variable_types import runtime_params as _typed_runtime_params
 
@@ -300,6 +299,8 @@ def _build_opl_task(task_id, name, data):
     task = None
 
     def opl(inputs):
+        from opl_builder import build_and_solve_opl
+
         input_dataframes = {
             parent.id: value for parent, value in zip(task.parents, inputs)
         }

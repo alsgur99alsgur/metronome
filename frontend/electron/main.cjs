@@ -70,6 +70,7 @@ async function createWindow() {
   const indexPath = adminApp
     ? path.join(process.resourcesPath, "admin-dist", "index.html")
     : path.join(__dirname, "../dist/index.html");
+  window.once("ready-to-show", () => window.show());
   await window.loadFile(indexPath);
   if (!adminApp) {
     window.webContents.on("will-prevent-unload", (event) => {
@@ -88,7 +89,6 @@ async function createWindow() {
       }
     });
   }
-  window.once("ready-to-show", () => window.show());
 }
 
 app.whenReady().then(createWindow).catch(async (error) => {
