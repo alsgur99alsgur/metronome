@@ -1,6 +1,6 @@
 import json
 import os
-from functools import lru_cache
+from copy import deepcopy
 
 
 BACKEND_ROOT = os.environ.get(
@@ -23,8 +23,11 @@ DEFAULT_CONFIG = {
         "workers": 3,
         "timeoutSeconds": 60,
     },
+    "storage": {
+        "retentionDays": 7,
+        "cacheMemoryLimitMb": 64,
+    },
 }
-
 
 def _deep_merge(base, override):
     result = dict(base)
@@ -36,12 +39,13 @@ def _deep_merge(base, override):
     return result
 
 
-@lru_cache(maxsize=1)
 def load_config():
     if not os.path.exists(CONFIG_PATH):
-        return DEFAULT_CONFIG
+        return deepcopy(DEFAULT_CONFIG)
     with open(CONFIG_PATH, "r", encoding="utf-8") as file:
         payload = json.load(file)
+    if not isinstance(payload, dict):
+        raise ValueError("config.json must contain an object.")
     return _deep_merge(DEFAULT_CONFIG, payload)
 
 

@@ -16,10 +16,6 @@ BACKEND_ROOT = os.environ.get(
 )
 CONNECTIONS_PATH = os.path.join(BACKEND_ROOT, "connections.json")
 SCHEMA_CACHE_PATH = os.path.join(BACKEND_ROOT, "connection_schema_cache.json")
-ORACLE_POOL_MIN = config_int("oracle", "poolMin")
-ORACLE_POOL_MAX = config_int("oracle", "poolMax")
-ORACLE_POOL_INCREMENT = config_int("oracle", "poolIncrement")
-ORACLE_WRITE_BATCH_SIZE = config_int("oracle", "writeBatchSize")
 _BIND_PATTERN = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 _SQL_COMMENT_OR_STRING_PATTERN = re.compile(r"(--[^\n]*|/\*.*?\*/|'(?:''|[^'])*')", re.DOTALL)
 _POOL_LOCK = Lock()
@@ -27,6 +23,17 @@ _SCHEMA_LOCK = Lock()
 _ORACLE_CLIENT_LOCK = Lock()
 _ORACLE_CLIENT_INITIALIZED = False
 _POOLS = {}
+
+
+def close_all_pools():
+    with _POOL_LOCK:
+        pools = list(_POOLS.values())
+        _POOLS.clear()
+    for pool in pools:
+        try:
+            pool.close(force=True)
+        except Exception:
+            pass
 
 
 @dataclass
@@ -254,12 +261,35 @@ def test_connection_settings(name, user, password, dsn, original_name=""):
 def get_connection_pool(connection_name):
     connection = load_connection(connection_name)
     oracledb = _load_oracledb()
-    key = _pool_key(connection)
+    pool_settings = (
+        config_int("oracle", "poolMin"),
+        config_int("oracle", "poolMax"),
+        config_int("oracle", "poolIncrement"),
+    )
+    connection_key = _pool_key(connection)
+    key = (*connection_key, *pool_settings)
     with _POOL_LOCK:
+        stale_keys = [
+            current_key for current_key in _POOLS
+            if current_key[:4] == connection_key and current_key != key
+        ]
+        stale_pools = [_POOLS.pop(current_key) for current_key in stale_keys]
+        for stale_pool in stale_pools:
+            try:
+                stale_pool.close(force=True)
+            except Exception:
+                pass
         pool = _POOLS.get(key)
         if pool is None:
             try:
-                pool = oracledb.create_pool(user=connection.user, password=connection.password, dsn=connection.dsn, min=ORACLE_POOL_MIN, max=ORACLE_POOL_MAX, increment=ORACLE_POOL_INCREMENT)
+                pool = oracledb.create_pool(
+                    user=connection.user,
+                    password=connection.password,
+                    dsn=connection.dsn,
+                    min=pool_settings[0],
+                    max=pool_settings[1],
+                    increment=pool_settings[2],
+                )
             except Exception as exc:
                 raise OracleConnectionFailure(f"Oracle connection pool failed: {connection.name}: {exc}") from exc
             _POOLS[key] = pool
@@ -276,6 +306,10 @@ def acquire_connection(connection_name):
 
 def _bind_names_from_sql(sql):
     return set(_BIND_PATTERN.findall(_SQL_COMMENT_OR_STRING_PATTERN.sub("", sql or "")))
+
+
+def bind_names_from_sql(sql):
+    return _bind_names_from_sql(sql)
 
 
 def _chunks(items, size):
@@ -398,7 +432,8 @@ def execute_oracle_write_records(connection_name, sql, bind_records):
     with conn:
         cursor = conn.cursor()
         total = 0
-        for batch in _chunks(records, max(1, ORACLE_WRITE_BATCH_SIZE)):
+        write_batch_size = max(1, config_int("oracle", "writeBatchSize"))
+        for batch in _chunks(records, write_batch_size):
             cursor.execute(sql, batch[0]) if len(batch) == 1 else cursor.executemany(sql, batch)
             if cursor.rowcount and cursor.rowcount > 0:
                 total += cursor.rowcount

@@ -1,4 +1,5 @@
 import Node from "./Node";
+import TextNode from "./TextNode";
 
 export const nodeTypes = {
   dbRead: Node,
@@ -19,11 +20,11 @@ export const nodeTypes = {
 
   cacheWrite: Node,
 
-  fileRead: Node,
 
-  fileWrite: Node,
 
   loopIn: Node,
 
   loopOut: Node,
+
+  text: TextNode,
 };

@@ -5,6 +5,10 @@ from uuid import UUID
 
 
 class ConcertStore:
+    NODE_TYPES = {
+        "dbRead", "dbWrite", "python", "opl", "concert", "concertInput",
+        "concertOutput", "cacheRead", "cacheWrite", "loopIn", "loopOut", "text",
+    }
     def __init__(self, path="./playings"):
         self.path = path
         os.makedirs(self.path, exist_ok=True)
@@ -54,6 +58,8 @@ class ConcertStore:
         if not isinstance(nodes, list):
             raise ValueError("Concert nodes must be an array.")
         for node in nodes:
+            if node.get("type") not in ConcertStore.NODE_TYPES:
+                raise ValueError(f"Unsupported Concert node type: {node.get('type')}")
             data = node.get("data") if isinstance(node, dict) else None
             node_name = data.get("name") if isinstance(data, dict) else None
             if not node_name:
@@ -62,6 +68,31 @@ class ConcertStore:
                 raise ValueError(
                     "Node name may contain only English letters, numbers, and underscores."
                 )
+
+    @staticmethod
+    def validate_variables(global_variables, input_variables):
+        seen = set()
+        for label, variables in (
+            ("Global", global_variables),
+            ("Input", input_variables),
+        ):
+            if not isinstance(variables, list):
+                raise ValueError(f"Concert {label} variables must be an array.")
+            for item in variables:
+                raw_name = str(item.get("name", "") if isinstance(item, dict) else "").strip()
+                name = raw_name[1:] if raw_name.startswith("$") else raw_name
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                    raise ValueError(f"Invalid {label} variable name: {raw_name or '<empty>'}")
+                if name in seen:
+                    raise ValueError(f"Duplicate Input/Global variable definition: ${name}")
+                variable_type = item.get("type") if isinstance(item, dict) else None
+                allowed_types = {"string", "number"}
+                if variable_type not in allowed_types:
+                    raise ValueError(
+                        f"{label} variable ${name} type must be one of: "
+                        f"{', '.join(sorted(allowed_types))}."
+                    )
+                seen.add(name)
 
     def _id_registry(self):
         registry = {}
@@ -123,6 +154,7 @@ class ConcertStore:
         registry = self._id_registry()
         concert_name = self.safe_path_name(name)
         self.validate_nodes(nodes)
+        self.validate_variables(global_variables or [], input_variables or [])
         if os.path.basename(concert_name) != concert_name:
             raise ValueError("Concert name must not contain a directory.")
         existing_name = registry.get(concert_id)
@@ -154,15 +186,7 @@ class ConcertStore:
         if not os.path.exists(path):
             raise FileNotFoundError(f"Concert not found: {name}")
         with open(path, "r", encoding="utf-8") as file:
-            payload = json.load(file)
-        payload_name = self.safe_name(payload.get("name"))
-        expected_name = os.path.basename(requested_name)
-        if payload_name != expected_name:
-            raise ValueError(
-                f"Concert name mismatch: file is {expected_name}, but payload name is {payload_name}."
-            )
-        self.validate_nodes(payload.get("nodes"))
-        return payload
+            return json.load(file)
 
     def list(self):
         concerts = []
@@ -175,7 +199,7 @@ class ConcertStore:
                 concert_name = relative[:-8].replace(os.sep, "/")
                 concerts.append(
                     {
-                        "concertId": self.validate_id(self.load(concert_name).get("concertId")),
+                        "concertId": self.load(concert_name).get("concertId"),
                         "name": concert_name,
                         "path": relative.replace(os.sep, "/"),
                         "folder": "" if "/" not in concert_name else concert_name.rsplit("/", 1)[0],

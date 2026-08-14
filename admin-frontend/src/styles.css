@@ -442,7 +442,7 @@ button:disabled {
 }
 
 .message-dialog-backdrop {
-  z-index: 120;
+  z-index: 2147483647;
 }
 
 .message-dialog {

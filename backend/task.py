@@ -22,6 +22,9 @@ class Task:
         self.loop_iterations = None
         self.loop_dependency_parent_ids = set()
         self.model_artifact_dirs = []
+        self.model_artifact_key = None
+        self.cache_scope = None
+        self.cache_file_key = None
 
     def __rshift__(self, other):
         self.children.append(other)

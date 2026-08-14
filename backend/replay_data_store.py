@@ -5,6 +5,7 @@ import re
 
 import pandas as pd
 
+from atomic_file import atomic_write_json, atomic_write_parquet
 from json_serialization import json_default
 
 
@@ -15,10 +16,12 @@ class ReplayDataStore:
         concert_name="untitled_concert",
         replay_id=None,
         run_timestamp=None,
+        resource_store=None,
     ):
         self.base_path = base_path
         self.concert_name = self._safe_name(concert_name)
         self.loading_replay = bool(replay_id)
+        self.resource_store = resource_store
         self.run_timestamp = run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.replay_id = (
             self._safe_replay_id(replay_id)
@@ -60,15 +63,11 @@ class ReplayDataStore:
     def save_metadata(self, metadata):
         if self.loading_replay:
             return
-        with open(os.path.join(self.path, "metadata.json"), "w", encoding="utf-8") as file:
-            json.dump(
-                metadata,
-                file,
-                ensure_ascii=False,
-                allow_nan=True,
-                indent=2,
-                default=json_default,
-            )
+        atomic_write_json(
+            os.path.join(self.path, "metadata.json"),
+            metadata,
+            default=json_default,
+        )
 
     @staticmethod
     def _load_metadata(path):
@@ -79,13 +78,17 @@ class ReplayDataStore:
             return json.load(file)
 
     def save_task_result(self, task, df, loop_key=None):
+        if task.type == "cacheRead" and task.cache_scope != "stage":
+            return
         if df is None:
             return
         if not isinstance(df, pd.DataFrame):
             raise TypeError("Replay task results must be pandas DataFrame objects.")
-        df.to_parquet(self._path_for_task(task, loop_key=loop_key))
+        atomic_write_parquet(df, self._path_for_task(task, loop_key=loop_key))
 
     def load_task_result(self, task, loop_key=None):
+        if task.type == "cacheRead" and task.cache_scope != "stage":
+            return task.execute([])
         path = self._path_for_task(task, loop_key=loop_key)
         if not os.path.exists(path):
             suffix = f" / loop {loop_key}" if loop_key else ""
@@ -100,17 +103,22 @@ class ReplayDataStore:
         replay_id,
         node_id,
         file_format="lp",
+        artifact_key=None,
     ):
         if file_format not in {"lp", "mps"}:
             raise ValueError(f"Unsupported model format: {file_format}")
         safe_concert = cls._safe_name(concert_name)
         safe_replay = cls._safe_replay_id(replay_id)
         safe_node = cls._safe_name(node_id)
-        path = os.path.join(
-            base_path,
-            safe_concert,
-            safe_replay,
-            f"{safe_node}.{file_format}",
+        artifact_root = os.path.join(base_path, safe_concert, safe_replay)
+        path = (
+            os.path.join(
+                artifact_root,
+                safe_node,
+                f"{cls._safe_name(artifact_key)}.{file_format}",
+            )
+            if artifact_key is not None
+            else os.path.join(artifact_root, f"{safe_node}.{file_format}")
         )
         if not os.path.isfile(path):
             raise FileNotFoundError(f"Model artifact not found for node: {node_id}")
@@ -183,8 +191,10 @@ class ReplayDataStore:
                     {
                         "id": replay_id,
                         "concertName": display_concert_name,
+                        "version": metadata.get("version", ""),
                         "label": f"{display_concert_name}/{replay_id}",
                         "createdAt": metadata["createdAt"],
+                        "owner": (metadata.get("importedFrom") or {}).get("serverName") or "Local",
                         "trigger": metadata.get("trigger"),
                         "executedBy": metadata.get("executedBy", {}),
                         "sourceKind": metadata.get("sourceKind"),
@@ -195,7 +205,6 @@ class ReplayDataStore:
                         "inputParams": metadata.get("inputParams"),
                         "calledParams": metadata.get("calledParams"),
                         "callerParams": metadata.get("callerParams"),
-                        "globalVariables": metadata.get("globalVariables", []),
                         "inputVariables": metadata.get("inputVariables", []),
                         "dataFiles": files,
                         "cache": cache or {"available": False},

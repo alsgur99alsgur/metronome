@@ -1,5 +1,16 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const path = require("node:path");
+
+const childWindows = new Map();
+
+function bringWindowToFront(targetWindow) {
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  if (targetWindow.isMinimized()) targetWindow.restore();
+  if (!targetWindow.isVisible()) targetWindow.show();
+  app.focus({ steal: true });
+  targetWindow.moveTop();
+  targetWindow.focus();
+}
 
 function isAdminApp() {
   return process.argv.includes("--admin");
@@ -26,16 +37,35 @@ async function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
   window.setMenu(null);
-  window.webContents.setWindowOpenHandler(() => ({
-    action: "allow",
-    overrideBrowserWindowOptions: { autoHideMenuBar: true },
-  }));
-  window.webContents.on("did-create-window", (childWindow) => {
+  window.webContents.setWindowOpenHandler(({ frameName }) => {
+    if (frameName?.startsWith("data-viewer-")) {
+      const existingWindow = childWindows.get(frameName);
+      if (existingWindow && !existingWindow.isDestroyed()) {
+        setImmediate(() => bringWindowToFront(existingWindow));
+      }
+    }
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: { autoHideMenuBar: true },
+    };
+  });
+  window.webContents.on("did-create-window", (childWindow, details) => {
     childWindow.setMenu(null);
     childWindow.setAutoHideMenuBar(true);
+    if (details.frameName?.startsWith("data-viewer-")) {
+      childWindows.set(details.frameName, childWindow);
+      childWindow.on("closed", () => {
+        if (childWindows.get(details.frameName) === childWindow) childWindows.delete(details.frameName);
+      });
+    }
+  });
+  ipcMain.on("focus-child-window", (event, frameName) => {
+    if (event.sender !== window.webContents || typeof frameName !== "string" || !frameName.startsWith("data-viewer-")) return;
+    bringWindowToFront(childWindows.get(frameName));
   });
   const indexPath = adminApp
     ? path.join(process.resourcesPath, "admin-dist", "index.html")

@@ -4,7 +4,7 @@ const outputHeightCssVar = "--concert-output-height";
 const minOutputHeight = 140;
 const maxOutputHeight = 520;
 
-const outputNodeTypes = new Set(["dbRead", "python", "dbWrite", "concert", "concertInput", "concertOutput", "cacheRead", "cacheWrite", "fileRead", "fileWrite"]);
+const outputNodeTypes = new Set(["dbRead", "python", "dbWrite", "concert", "concertInput", "concertOutput", "cacheRead", "cacheWrite"]);
 const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write" })[type] || type;
 
 const formatDuration = (value) => {
@@ -14,9 +14,7 @@ const formatDuration = (value) => {
 
 const resultSummary = (result) => {
   if (!result) return "";
-  if (result.kind === "dataframe") {
-    return `${result.rows ?? 0} rows / ${(result.columns || []).length} columns`;
-  }
+  if (result.kind === "dataframe") return "";
   if (result.kind === "value") return "value";
   return result.kind || "";
 };
@@ -76,7 +74,10 @@ export default function ConcertOutputPanel({
           const status = nodeRun?.status || node.data?.status || "idle";
           const duration = nodeRun?.durationMs ?? node.data?.runDurationMs;
           const result = nodeRun?.result;
-          const detail = nodeRun?.error || nodeRun?.logs || resultSummary(result) || "";
+          const cacheSummary = nodeRun?.rows != null
+            ? `${nodeRun.rows} rows / ${(nodeRun.columns || []).length} columns`
+            : "";
+          const detail = nodeRun?.error || nodeRun?.logs || cacheSummary || resultSummary(result) || "";
 
           return {
             id: node.id,
@@ -158,7 +159,7 @@ export default function ConcertOutputPanel({
             <>
               <div className="result-title">{selectedOutput.name}</div>
               <pre className={selectedOutput.error ? "error-text" : ""}>
-                {selectedOutput.error || selectedOutput.logs || resultSummary(selectedOutput.result) || "No output for this node."}
+                {selectedOutput.detail || "No output for this node."}
               </pre>
             </>
           ) : (

@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ConcertFileTable, folderOf } from "./ConcertFileTable";
+import { ConcertFileTable } from "./ConcertFileTable";
+import { folderOf } from "./concertPathUtils";
 import { ConcertDirectoryTree, ConcertFolderCreate } from "./ConcertListPanel";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 const versionPattern = /^[A-Za-z0-9.-]+$/;
 
 export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy, onDirectoryCreated, onClose }) {
+  const { showError } = useErrorDialog();
   const [version, setVersion] = useState("");
   const [directories, setDirectories] = useState([]);
   const [deployments, setDeployments] = useState([]);
@@ -17,6 +20,10 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
   const [warning, setWarning] = useState("");
   const [notice, setNotice] = useState("");
   const attemptCommitId = useRef(null);
+
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -36,7 +43,7 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [busy, notice, onClose, warning]);
 
-  const loadDirectories = async (preferredDirectory = directory) => {
+  const loadDirectories = useCallback(async (preferredDirectory = folderOf(sourceName)) => {
     const [directoryResponse, deploymentResponse] = await Promise.all([
       fetch(`${apiBaseUrl}/deployments/directories`),
       fetch(`${apiBaseUrl}/deployments`),
@@ -64,9 +71,11 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
     setLockedDirectory(nextLockedDirectory);
     setHasRehearsal(rehearsalExists);
     setDirectory(nextLockedDirectory ?? (nextDirectories.includes(preferredDirectory) ? preferredDirectory : ""));
-  };
+  }, [apiBaseUrl, sourceName]);
 
-  useEffect(() => { loadDirectories().catch((nextError) => setError(nextError.message)); }, []);
+  useEffect(() => {
+    loadDirectories().catch((nextError) => setError(nextError.message));
+  }, [loadDirectories]);
 
   const deploy = async (allowMismatch = false) => {
     if (hasRehearsal) return;
@@ -135,7 +144,6 @@ export default function DeployDialog({ target, sourceName, apiBaseUrl, onDeploy,
             Version
             <input autoFocus value={version} onChange={(event) => setVersion(event.target.value)} />
           </label>
-          {error && <div className="dialog-error">{error}</div>}
         </div>
         <div className="save-dialog-actions">
           <button disabled={busy} onClick={onClose}>Cancel</button>

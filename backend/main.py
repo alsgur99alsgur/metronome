@@ -1,25 +1,26 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
+import multiprocessing
 import os
 import re
 import socket
+import shutil
+import tempfile
 import time
+import zipfile
 from threading import Lock, Thread
 from typing import Any, Optional
-from uuid import uuid4
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from cache_data_store import CacheDataStore
 from concert_store import ConcertStore
 from deployment_store import DeploymentMismatchError, DeploymentStore
-from concert_builder import build_concert, collect_dependencies, selected_concert_graph
-from executor import Executor
-from json_serialization import json_default
 from oracle_client import (
     OracleUnavailable,
     describe_oracle_query,
@@ -33,6 +34,8 @@ from resource_store import ResourceStore
 from server_manager import ServerManager
 from schema_inference import infer_concert_columns
 from timer_manager import TimerManager
+from storage_retention import StorageRetentionManager
+from run_process import ConcertRunProcess
 from variable_types import runtime_params as _typed_runtime_params
 
 BACKEND_ROOT = os.environ.get(
@@ -45,6 +48,7 @@ STAGE_ROOT = os.path.join(BACKEND_ROOT, "stage")
 TMP_ROOT = os.path.join(BACKEND_ROOT, "tmp")
 SERVERS_PATH = os.path.join(BACKEND_ROOT, "servers.json")
 TIMERS_PATH = os.path.join(BACKEND_ROOT, "timers.json")
+RUN_STATUS_ROOT = os.path.join(BACKEND_ROOT, "run-status")
 EXECUTOR_ID = socket.gethostname()
 
 
@@ -159,14 +163,14 @@ class DataQueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=1000, ge=1, le=5000)
-    search: str = ""
+    limit: int = Field(default=1000, ge=1, le=1000)
     filters: list[DataFilterRequest] = Field(default_factory=list)
     sorts: list[DataSortRequest] = Field(default_factory=list)
 
 
 class StageResourceRequest(BaseModel):
-    kind: str
+    model_config = ConfigDict(extra="forbid")
+
     name: str
 
 
@@ -207,14 +211,14 @@ class DeploymentDeleteRequest(BaseModel):
     path: str
 
 
-def _dataframe_payload(dataframe, limit=1000):
+def _dataframe_payload(dataframe, limit=1000, total_rows=None):
     snapshot = dataframe.head(limit).copy()
     snapshot.columns = [str(column) for column in snapshot.columns]
     snapshot = snapshot.astype(object).where(pd.notnull(snapshot), None)
     snapshot = snapshot.replace({float("inf"): None, float("-inf"): None})
     return {
         "kind": "dataframe",
-        "rows": int(len(dataframe)),
+        "rows": int(len(dataframe) if total_rows is None else total_rows),
         "columns": list(snapshot.columns),
         "dtypes": {
             str(column): str(dtype)
@@ -222,7 +226,7 @@ def _dataframe_payload(dataframe, limit=1000):
         },
         "data": snapshot.to_dict(orient="records"),
         "dataLimit": limit,
-        "truncated": len(dataframe) > limit,
+        "truncated": (len(dataframe) if total_rows is None else total_rows) > limit,
     }
 
 
@@ -321,7 +325,10 @@ app.add_middleware(
 
 runs = {}
 runs_lock = Lock()
-executors = {}
+run_identity_lock = Lock()
+last_run_timestamp = None
+execution_processes = {}
+execution_cancel_events = {}
 concert_store = ConcertStore(PLAYING_ROOT)
 deployment_store = DeploymentStore(BACKEND_ROOT)
 resource_store = ResourceStore(STAGE_ROOT, TMP_ROOT)
@@ -336,43 +343,102 @@ timer_manager = TimerManager(
     ),
     status_callback=lambda run_id: _timer_run_state(run_id),
 )
+retention_manager = StorageRetentionManager(
+    REPLAY_ROOT,
+    RUN_STATUS_ROOT,
+    STAGE_ROOT,
+)
 
 
 @app.on_event("startup")
 def start_timer_manager():
+    retention_manager.start()
     timer_manager.start()
 
 
 @app.on_event("shutdown")
 def stop_timer_manager():
     timer_manager.stop()
+    retention_manager.stop()
+    with runs_lock:
+        active = list(execution_processes.items())
+        cancel_events = dict(execution_cancel_events)
+    for run_id, process in active:
+        event = cancel_events.get(run_id)
+        if event is not None:
+            event.set()
+        process.join(timeout=5)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=2)
 
 
 def _run_timestamp():
-    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    global last_run_timestamp
+    with run_identity_lock:
+        current = datetime.now()
+        if last_run_timestamp is not None and current <= last_run_timestamp:
+            current = last_run_timestamp + timedelta(microseconds=1)
+        last_run_timestamp = current
+        return current.strftime("%Y%m%d_%H%M%S_%f")
 
 
 def _now():
     return datetime.utcnow().isoformat() + "Z"
 
 
-def _initial_node_states(task_map):
-    return {
-        task.id: {
-            "id": task.id,
-            "name": task.name,
-            "type": task.type,
-            "status": "pending",
-            "logs": "",
-            "error": None,
-            "result": None,
-            "durationMs": None,
-            "cacheDurationMs": None,
-            "loopIterations": None,
-            "updatedAt": _now(),
-        }
-        for task in task_map.values()
+def _run_status_path(run_id):
+    safe_run_id = str(run_id or "")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_run_id):
+        raise ValueError(f"Invalid runId: {run_id}")
+    return os.path.join(RUN_STATUS_ROOT, f"{safe_run_id}.json")
+
+
+def _write_run_status(run_state):
+    os.makedirs(RUN_STATUS_ROOT, exist_ok=True)
+    node_errors = [
+        node.get("error")
+        for node in run_state.get("nodes", {}).values()
+        if node.get("error")
+    ]
+    payload = {
+        "id": run_state["id"],
+        "concertName": run_state["concertName"],
+        "status": run_state["status"],
+        "createdAt": run_state.get("createdAt"),
+        "updatedAt": run_state.get("updatedAt"),
+        "finishedAt": run_state.get("finishedAt"),
+        "timing": run_state.get("timing"),
+        "trigger": run_state.get("trigger"),
+        "error": node_errors[0] if node_errors else None,
+        "nodes": {
+            node_id: {key: value for key, value in node.items() if key != "result"}
+            for node_id, node in run_state.get("nodes", {}).items()
+        },
+        "cache": run_state.get("cache"),
+        "replay": run_state.get("replay"),
     }
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{run_state['id']}.",
+        suffix=".tmp",
+        dir=RUN_STATUS_ROOT,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+        os.replace(temporary, _run_status_path(run_state["id"]))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _load_run_status(run_id):
+    path = _run_status_path(run_id)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Run status not found: {run_id}")
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 def _run_response(run_state, include_data=False):
@@ -391,206 +457,6 @@ def _run_response(run_state, include_data=False):
         },
     }
     return response
-
-
-def _finish_cache(replay_root, cache_id, status, finished_at=None, timing=None):
-    found = CacheDataStore.find_cache(replay_root, cache_id)
-    if not found:
-        return
-    _, _, cache_path, metadata = found
-    metadata["status"] = status
-    metadata["finishedAt"] = finished_at or _now()
-    metadata["updatedAt"] = _now()
-    if timing is not None:
-        metadata["timing"] = timing
-    with open(os.path.join(cache_path, "metadata.json"), "w", encoding="utf-8") as file:
-        json.dump(
-            metadata,
-            file,
-            ensure_ascii=False,
-            allow_nan=True,
-            indent=2,
-            default=json_default,
-        )
-
-
-def _run_in_background(
-    run_started_at,
-    run_id,
-    concert_name,
-    task_map,
-    roots,
-    replay,
-    replay_id,
-    run_timestamp,
-    run_task_ids,
-    replay_metadata,
-    cache_metadata,
-):
-    def on_event(
-        task,
-        status,
-        logs="",
-        error=None,
-        result=None,
-        duration_ms=None,
-        cache_duration_ms=None,
-        replay_save_duration_ms=None,
-    ):
-        with runs_lock:
-            run_state = runs[run_id]
-            if run_state.get("status") == "canceled" and status != "skipped":
-                return
-            node = run_state["nodes"][task.id]
-            node["status"] = status
-            node["logs"] = logs or node["logs"]
-            node["error"] = error
-            node["updatedAt"] = _now()
-            if result is not None:
-                node["result"] = result
-            if task.loop_iterations is not None:
-                node["loopIterations"] = task.loop_iterations
-            if duration_ms is not None:
-                previous_duration_ms = node.get("durationMs") or 0
-                node["durationMs"] = duration_ms
-                run_state["timing"]["executionMs"] += duration_ms - previous_duration_ms
-            if replay_save_duration_ms is not None:
-                run_state["timing"]["replaySaveMs"] += replay_save_duration_ms
-            if cache_duration_ms is not None:
-                node["cacheDurationMs"] = (
-                    node.get("cacheDurationMs") or 0
-                ) + cache_duration_ms
-                run_state["timing"]["cacheSaveMs"] += cache_duration_ms
-            run_state["timing"]["executionReplayMs"] = (
-                run_state["timing"]["executionMs"] + run_state["timing"]["replaySaveMs"]
-            )
-            run_state["timing"]["executionReplayCacheMs"] = (
-                run_state["timing"]["executionReplayMs"]
-                + run_state["timing"]["cacheSaveMs"]
-            )
-
-            statuses = [item["status"] for item in run_state["nodes"].values()]
-            if "error" in statuses:
-                run_state["status"] = "error"
-            elif run_state.get("status") == "canceled":
-                pass
-            elif any(item == "running" for item in statuses):
-                run_state["status"] = "running"
-            elif all(item in ("success", "skipped") for item in statuses):
-                run_state["status"] = "success"
-            run_state["updatedAt"] = _now()
-
-    with runs_lock:
-        runs[run_id]["status"] = "running"
-        runs[run_id]["updatedAt"] = _now()
-
-    cache_data_store = None
-
-    def finish_cache(status, finished_at=None, timing=None):
-        if cache_metadata is None:
-            return
-        if cache_data_store is not None:
-            cache_data_store.finish(status, finished_at=finished_at, timing=timing)
-            return
-        _finish_cache(
-            REPLAY_ROOT,
-            cache_metadata["id"],
-            status,
-            finished_at=finished_at,
-            timing=timing,
-        )
-
-    try:
-        replay_data_store = ReplayDataStore(
-            REPLAY_ROOT,
-            concert_name=concert_name,
-            replay_id=replay_id if replay else None,
-            run_timestamp=run_timestamp,
-        )
-        replay_data_store.save_metadata(replay_metadata)
-        if cache_metadata is not None:
-            cache_data_store = CacheDataStore(
-                REPLAY_ROOT,
-                concert_name=concert_name,
-                source_replay_id=cache_metadata["sourceReplayId"],
-                metadata=cache_metadata,
-            )
-        executor = Executor(
-            replay_data_store,
-            cache_data_store=cache_data_store,
-            replay=replay,
-            on_event=on_event,
-            runnable_task_ids=run_task_ids,
-        )
-        with runs_lock:
-            executors[run_id] = executor
-        executor.start()
-        for root in roots:
-            executor.submit(root)
-        executor.wait()
-    except Exception as exc:
-        with runs_lock:
-            run_state = runs[run_id]
-            run_state["status"] = "error"
-            run_state["updatedAt"] = _now()
-            run_state["finishedAt"] = _now()
-            run_state["timing"]["totalElapsedMs"] = int(
-                (time.time() - run_started_at) * 1000
-            )
-            for node_id, node in run_state["nodes"].items():
-                if node_id in run_task_ids and node["status"] == "pending":
-                    node["status"] = "skipped"
-                    node["error"] = str(exc)
-                    node["updatedAt"] = _now()
-        with runs_lock:
-            timing = runs.get(run_id, {}).get("timing")
-        finish_cache("error", timing=timing)
-        return
-    finally:
-        with runs_lock:
-            executors.pop(run_id, None)
-        resource_store.cleanup_run(run_id)
-
-    finish_status = None
-    finish_finished_at = None
-    finish_timing = None
-    with runs_lock:
-        run_state = runs[run_id]
-        if run_state["status"] == "canceled":
-            run_state["updatedAt"] = _now()
-            run_state["finishedAt"] = _now()
-            run_state["timing"]["totalElapsedMs"] = int(
-                (time.time() - run_started_at) * 1000
-            )
-            finish_status = "canceled"
-            finish_finished_at = run_state["finishedAt"]
-            finish_timing = run_state.get("timing")
-        else:
-            pending_nodes = [
-                node
-                for node_id, node in run_state["nodes"].items()
-                if node_id in run_task_ids and node["status"] == "pending"
-            ]
-            if pending_nodes:
-                run_state["status"] = "error"
-                for node in pending_nodes:
-                    node["status"] = "skipped"
-                    node["error"] = "Run finished before this node became executable."
-                    node["updatedAt"] = _now()
-            elif run_state["status"] == "running":
-                run_state["status"] = "success"
-            run_state["updatedAt"] = _now()
-            run_state["finishedAt"] = _now()
-            run_state["timing"]["totalElapsedMs"] = int(
-                (time.time() - run_started_at) * 1000
-            )
-            finish_status = run_state["status"]
-            finish_finished_at = run_state["finishedAt"]
-            finish_timing = run_state.get("timing")
-
-    finish_cache(finish_status, finish_finished_at, finish_timing)
-    if finish_status == "canceled":
-        return
 
 
 @app.get("/servers")
@@ -795,43 +661,46 @@ def list_stage_resources():
 @app.post("/stage-resources", status_code=201)
 def create_stage_resource(req: StageResourceRequest):
     try:
-        return resource_store.create_stage(req.kind, req.name)
+        return resource_store.create_stage(req.name)
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/stage-resources/{kind}/{name}/schema")
-def get_stage_resource_schema(kind: str, name: str):
+@app.get("/stage-resources/{name}/schema")
+def get_stage_resource_schema(name: str):
     try:
-        dataframe = resource_store.read(kind, "stage", name)
-        return {
-            "columns": [
-                {"name": str(column), "type": str(dtype)}
-                for column, dtype in zip(dataframe.columns, dataframe.dtypes)
-            ]
-        }
+        return {"columns": resource_store.schema("stage", name)}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/stage-resources/{kind}/{name}/data")
-def get_stage_resource_data(kind: str, name: str):
+@app.get("/stage-resources/{name}/data")
+def get_stage_resource_data(name: str):
     try:
-        return _dataframe_payload(resource_store.read(kind, "stage", name))
+        dataframe, total_rows = resource_store.preview(
+            "stage",
+            name,
+            limit=1000,
+        )
+        return _dataframe_payload(
+            dataframe,
+            limit=1000,
+            total_rows=total_rows,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.delete("/stage-resources/{kind}/{name}")
-def delete_stage_resource(kind: str, name: str):
+@app.delete("/stage-resources/{name}")
+def delete_stage_resource(name: str):
     try:
-        resource_store.delete_stage(kind, name)
+        resource_store.delete_stage(name)
         return {"deleted": True}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -901,11 +770,18 @@ def describe_db_read(req: DbReadDescribeRequest):
 @app.post("/schema/infer")
 def infer_schema(req: SchemaInferRequest):
     params = _runtime_params(req.globalVariables, req.inputVariables)
+    nodes = [node for node in req.nodes if node.get("type") != "text"]
+    node_ids = {node["id"] for node in nodes}
+    edges = [
+        edge
+        for edge in req.edges
+        if edge.get("source") in node_ids and edge.get("target") in node_ids
+    ]
     return infer_concert_columns(
-        req.nodes,
-        req.edges,
+        nodes,
+        edges,
         params=params,
-        start_node_id=req.startNodeId,
+        start_node_id=req.startNodeId if req.startNodeId in node_ids else None,
     )
 
 
@@ -928,11 +804,71 @@ def run(req: RunRequest, request: Request):
     )
 
 
+def _watch_concert_process(run_id, process, event_queue):
+    terminal = False
+    while not terminal:
+        try:
+            event = event_queue.get(timeout=0.25)
+        except Exception:
+            if not process.is_alive():
+                event = {"kind": "failed", "error": f"Concert process exited with code {process.exitcode}."}
+            else:
+                continue
+        kind = event.get("kind")
+        with runs_lock:
+            run_state = runs.get(run_id)
+            if run_state is None:
+                terminal = True
+                continue
+            if kind == "started":
+                run_state["status"] = "running"
+                run_state["executor"]["pid"] = event.get("pid")
+                run_state["cache"]["cacheId"] = event.get("cacheId")
+                run_state["replay"]["outputReplayId"] = event.get("replayId")
+            elif kind == "node":
+                node = run_state["nodes"].get(event.get("nodeId"))
+                if node is not None and run_state["status"] != "canceled":
+                    node["status"] = event.get("status")
+                    node["logs"] = event.get("logs") or node.get("logs", "")
+                    node["error"] = event.get("error")
+                    node["durationMs"] = event.get("durationMs")
+                    node["cacheDurationMs"] = event.get("cacheDurationMs")
+                    node["loopIterations"] = event.get("loopIterations")
+                    if event.get("result") is not None:
+                        node["result"] = event["result"]
+                    node["updatedAt"] = _now()
+            elif kind in {"finished", "failed"}:
+                if run_state["status"] != "canceled":
+                    run_state["status"] = event.get("status", "error") if kind == "finished" else "error"
+                run_state["error"] = event.get("error")
+                run_state["updatedAt"] = _now()
+                run_state["finishedAt"] = _now()
+                run_state["timing"] = event.get("timing") or run_state.get("timing")
+                for node in run_state["nodes"].values():
+                    if node["status"] in {"pending", "running"}:
+                        node["status"] = "skipped"
+                        node["error"] = event.get("error") or "Run finished before this node became executable."
+                terminal = True
+            run_state["updatedAt"] = _now()
+    # The terminal message is emitted before child-side Executor/Oracle cleanup.
+    # Keep the handle registered until the process has actually exited.
+    process.join()
+    with runs_lock:
+        run_state = runs.get(run_id)
+        if run_state is not None:
+            _write_run_status(run_state)
+        execution_processes.pop(run_id, None)
+        execution_cancel_events.pop(run_id, None)
+        runs.pop(run_id, None)
+    event_queue.close()
+    event_queue.join_thread()
+
+
 def _queue_run(
     concert_name,
-    concert_id,
-    nodes,
-    edges,
+    concert_id=None,
+    nodes=None,
+    edges=None,
     mode="all",
     selected=None,
     replay=False,
@@ -944,241 +880,87 @@ def _queue_run(
     request=None,
     cache_enabled=True,
 ):
-    concert_name = os.path.basename(ConcertStore.safe_path_name(concert_name))
+    del cache_enabled
+    concert_name = ConcertStore.safe_path_name(concert_name)
     concert_id = ConcertStore.validate_id(concert_id)
-    if not concert_name:
-        raise HTTPException(status_code=400, detail="concertName is required")
+    ConcertStore.validate_nodes(nodes)
+    if not isinstance(edges, list):
+        raise ValueError("Concert edges must be an array.")
+    if not isinstance(global_variables, list):
+        raise ValueError("Concert globalVariables must be an array.")
+    if not isinstance(input_variables, list):
+        raise ValueError("Concert inputVariables must be an array.")
+    concert = {
+        "concertId": concert_id,
+        "name": concert_name,
+        "nodes": nodes,
+        "edges": edges,
+        "globalVariables": global_variables,
+        "inputVariables": input_variables,
+    }
     if replay and not replay_id:
-        raise HTTPException(
-            status_code=400, detail="replayId is required for replay runs"
-        )
-
-    params = _runtime_params(global_variables, input_variables, params)
-    caller_input_params = _params_for_variables(input_variables, params)
-    run_started_at = time.time()
-    run_id = str(uuid4())
-    build_nodes = nodes
-    build_edges = edges
-    if mode == "selected":
-        try:
-            build_nodes, build_edges = selected_concert_graph(nodes, edges, selected)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    build_start = time.time()
-    task_map = build_concert(
-        build_nodes,
-        build_edges,
-        params=params,
-        concert_root=PLAYING_ROOT,
-        replay_root=REPLAY_ROOT,
-        call_stack=[concert_name],
-        call_ids=[concert_id],
-        caller_input_params=caller_input_params,
-        resource_store=resource_store,
-        run_id=run_id,
-    )
-    build_duration_ms = int((time.time() - build_start) * 1000)
-
-    if mode == "selected":
-        if not selected or selected not in task_map:
-            raise HTTPException(
-                status_code=400, detail="selected node is required for selected mode"
-            )
-        run_tasks = collect_dependencies(task_map[selected])
-        run_task_ids = {task.id for task in run_tasks}
-        roots = [
-            task
-            for task in run_tasks
-            if not task.internal_loop_task
-            and not any(
-                parent.id in run_task_ids and not parent.internal_loop_task
-                for parent in task.parents
-            )
-        ]
-    else:
-        run_task_ids = set(task_map.keys())
-        roots = [
-            task
-            for task in task_map.values()
-            if not task.internal_loop_task
-            and not any(not parent.internal_loop_task for parent in task.parents)
-        ]
-
-    if not roots:
-        raise HTTPException(
-            status_code=400, detail="Concert has no executable root nodes"
-        )
-
+        raise HTTPException(status_code=400, detail="replayId is required for replay runs")
+    if mode not in {"all", "selected"}:
+        raise HTTPException(status_code=400, detail=f"Invalid run mode: {mode}")
+    input_values = dict(params or {})
     run_timestamp = _run_timestamp()
-    output_replay_id = (
-        None if replay else ReplayDataStore.replay_id_for_timestamp(run_timestamp)
-    )
-    node_states = _initial_node_states(task_map)
-    for node in nodes:
-        node_id = node["id"]
-        if node_id in node_states:
-            continue
-        node_states[node_id] = {
-            "id": node_id,
-            "name": node["data"]["name"],
-            "type": node.get("type", ""),
-            "status": "pending",
-            "logs": "",
-            "error": None,
-            "result": None,
-            "durationMs": None,
-            "cacheDurationMs": None,
-            "loopIterations": None,
-            "updatedAt": _now(),
+    run_id = f"{concert_name}_{run_timestamp}"
+    node_states = {
+        node["id"]: {
+            "id": node["id"], "name": node["data"]["name"], "type": node.get("type", ""),
+            "status": "pending", "logs": "", "error": None, "result": None,
+            "durationMs": None, "cacheDurationMs": None, "loopIterations": None, "updatedAt": _now(),
         }
-    for node_id, state in node_states.items():
-        if node_id not in run_task_ids:
-            state["status"] = "skipped"
-            state["error"] = "Not included in selected run."
-    cache_node_states = {
-        node_id: {
-            "id": node_id,
-            "name": state["name"],
-            "type": state["type"],
-            "status": state["status"],
-            "logs": state["logs"],
-            "error": state["error"],
-            "durationMs": state["durationMs"],
-            "loopIterations": state["loopIterations"],
-            "cacheDurationMs": state["cacheDurationMs"],
-            "updatedAt": state["updatedAt"],
-            "kind": "none",
-        }
-        for node_id, state in node_states.items()
+        for node in concert["nodes"] if node.get("type") != "text"
     }
-
     source_metadata = _run_source_metadata(trigger, request)
-    replay_metadata = {
-        "id": output_replay_id or replay_id,
-        "concertName": concert_name,
-        "createdAt": _now(),
-        "trigger": trigger,
-        **source_metadata,
-        "params": params,
-        "inputParams": caller_input_params,
-        "globalVariables": global_variables or [],
-        "inputVariables": input_variables or [],
+    mp_context = multiprocessing.get_context("spawn")
+    event_queue = mp_context.Queue()
+    cancel_event = mp_context.Event()
+    context = {
+        "runId": run_id, "trigger": trigger, "mode": mode, "selected": selected,
+        "replay": replay, "replayId": replay_id, "runTimestamp": run_timestamp,
+        "sourceMetadata": source_metadata,
+        "playingRoot": PLAYING_ROOT, "replayRoot": REPLAY_ROOT, "stageRoot": STAGE_ROOT,
     }
-    source_replay_id = replay_id if replay else output_replay_id
-    cache_id = CacheDataStore._safe_name(source_replay_id) if cache_enabled else None
-    cache_metadata = (
-        {
-            "id": cache_id,
-            "runId": run_id,
-            "concertName": concert_name,
-            "createdAt": _now(),
-            "mode": mode,
-            "selected": selected,
-            "replay": replay,
-            "sourceReplayId": source_replay_id,
-            "trigger": trigger,
-            **source_metadata,
-            "params": params,
-            "inputParams": caller_input_params,
-            "globalVariables": global_variables or [],
-            "inputVariables": input_variables or [],
-            "status": "queued",
-            "nodes": cache_node_states,
-            "timing": {
-                "totalElapsedMs": 0,
-                "buildConcertMs": build_duration_ms,
-                "executionMs": 0,
-                "replaySaveMs": 0,
-                "executionReplayMs": 0,
-                "cacheSaveMs": 0,
-                "executionReplayCacheMs": 0,
-            },
-        }
-        if cache_enabled
-        else None
+    process = ConcertRunProcess(
+        concert,
+        input_values,
+        run_context=context,
+        event_queue=event_queue,
+        cancel_event=cancel_event,
     )
-
-    replay_artifact_dir = os.path.join(
-        REPLAY_ROOT,
-        ReplayDataStore._safe_name(concert_name),
-        ReplayDataStore._safe_replay_id(source_replay_id),
-    )
-    cache_artifact_dir = os.path.join(replay_artifact_dir, "cache")
-    for task in task_map.values():
-        if task.type != "opl":
-            continue
-        task.model_artifact_dirs = [replay_artifact_dir]
-        if cache_enabled:
-            task.model_artifact_dirs.append(cache_artifact_dir)
-
     with runs_lock:
         runs[run_id] = {
-            "id": run_id,
-            "concertName": concert_name,
-            "status": "queued",
-            "nodes": node_states,
-            "createdAt": _now(),
-            "updatedAt": _now(),
-            "finishedAt": None,
-            "timing": {
-                "totalElapsedMs": 0,
-                "buildConcertMs": build_duration_ms,
-                "executionMs": 0,
-                "replaySaveMs": 0,
-                "executionReplayMs": 0,
-                "cacheSaveMs": 0,
-                "executionReplayCacheMs": 0,
-            },
-            "trigger": trigger,
-            **source_metadata,
-            "params": params,
-            "globalVariables": global_variables or [],
-            "inputVariables": input_variables or [],
-            "executor": {
-                "id": EXECUTOR_ID,
-                "replayRoot": os.path.abspath(REPLAY_ROOT),
-            },
-            "replay": {
-                "enabled": replay,
-                "selectedReplayId": replay_id,
-                "outputReplayId": output_replay_id,
-                "folder": f"{concert_name}/{replay_id if replay else output_replay_id}",
-            },
-            "cache": {
-                "enabled": cache_enabled,
-                "cacheId": cache_id,
-                "folder": (
-                    f"{concert_name}/{source_replay_id}/cache"
-                    if cache_enabled
-                    else None
-                ),
-            },
+            "id": run_id, "concertName": concert_name, "status": "queued", "nodes": node_states,
+            "createdAt": _now(), "updatedAt": _now(), "finishedAt": None,
+            "timing": {"totalElapsedMs": 0, "buildConcertMs": 0, "executionMs": 0, "replaySaveMs": 0, "cacheSaveMs": 0},
+            "trigger": trigger, **source_metadata, "params": input_values,
+            "globalVariables": concert.get("globalVariables") or [], "inputVariables": concert.get("inputVariables") or [],
+            "executor": {"id": EXECUTOR_ID, "pid": None, "replayRoot": os.path.abspath(REPLAY_ROOT)},
+            "replay": {"enabled": replay, "selectedReplayId": replay_id, "outputReplayId": None},
+            "cache": {"enabled": trigger == "manual", "cacheId": None},
         }
-
+        execution_processes[run_id] = process
+        execution_cancel_events[run_id] = cancel_event
+    try:
+        process.start()
+    except Exception:
+        with runs_lock:
+            runs.pop(run_id, None)
+            execution_processes.pop(run_id, None)
+            execution_cancel_events.pop(run_id, None)
+        event_queue.close()
+        event_queue.join_thread()
+        raise
     Thread(
-        target=_run_in_background,
-        args=(
-            run_started_at,
-            run_id,
-            concert_name,
-            task_map,
-            roots,
-            replay,
-            replay_id,
-            run_timestamp,
-            run_task_ids,
-            replay_metadata,
-            cache_metadata,
-        ),
-        daemon=True,
+        target=_watch_concert_process,
+        args=(run_id, process, event_queue),
+        name=f"concert-monitor-{run_id}", daemon=True,
     ).start()
     return {
-        "runId": run_id,
-        "status": "queued",
-        "replayId": output_replay_id,
-        "cacheId": cache_id,
-        "executorId": EXECUTOR_ID,
-        "replayRoot": os.path.abspath(REPLAY_ROOT),
+        "runId": run_id, "status": "queued", "replayId": None, "cacheId": None,
+        "executorId": EXECUTOR_ID, "replayRoot": os.path.abspath(REPLAY_ROOT),
     }
 
 
@@ -1227,7 +1009,7 @@ def _timer_run_state(run_id):
     with runs_lock:
         if run_id in runs:
             return runs[run_id]
-    return CacheDataStore.load_run(REPLAY_ROOT, run_id)
+    return _load_run_status(run_id)
 
 
 @app.post("/events/trigger")
@@ -1246,22 +1028,34 @@ def event_trigger(req: EventRunRequest, request: Request):
 
 
 @app.get("/runs/{run_id}")
-def get_run(run_id: str, includeData: bool = Query(default=False)):
+def get_run(
+    run_id: str,
+    concertName: str = Query(...),
+    includeData: bool = Query(default=False),
+):
     with runs_lock:
         if run_id in runs:
             return _run_response(runs[run_id], include_data=includeData)
     try:
-        return CacheDataStore.load_run(REPLAY_ROOT, run_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="run not found") from exc
+        return CacheDataStore.load_run(
+            REPLAY_ROOT,
+            run_id,
+            concert_name=concertName,
+        )
+    except FileNotFoundError:
+        try:
+            return _load_run_status(run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
 
 
 @app.get("/runs/{run_id}/nodes/{node_id}/data")
 def get_run_node_data(
     run_id: str,
     node_id: str,
+    concertName: str = Query(...),
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=1000, ge=1, le=5000),
+    limit: int = Query(default=1000, ge=1, le=1000),
 ):
     cache_id = run_id
     with runs_lock:
@@ -1288,6 +1082,7 @@ def get_run_node_data(
                 node_id,
                 max_grid_rows=limit,
                 offset=offset,
+                concert_name=concertName,
             ),
         }
     except FileNotFoundError as exc:
@@ -1295,7 +1090,12 @@ def get_run_node_data(
 
 
 @app.post("/runs/{run_id}/nodes/{node_id}/data/query")
-def query_run_node_data(run_id: str, node_id: str, req: DataQueryRequest):
+def query_run_node_data(
+    run_id: str,
+    node_id: str,
+    req: DataQueryRequest,
+    concertName: str = Query(...),
+):
     cache_id = run_id
     with runs_lock:
         if run_id in runs:
@@ -1313,9 +1113,9 @@ def query_run_node_data(run_id: str, node_id: str, req: DataQueryRequest):
                 node_id,
                 offset=req.offset,
                 limit=req.limit,
-                search=req.search,
                 filters=[item.model_dump() for item in req.filters],
                 sorts=[item.model_dump() for item in req.sorts],
+                concert_name=concertName,
             ),
         }
     except FileNotFoundError as exc:
@@ -1343,14 +1143,22 @@ def get_opl_model(
                 )
         try:
             return CacheDataStore.load_model_artifact(
-                REPLAY_ROOT, resolved_cache_id, nodeId, format
+                REPLAY_ROOT,
+                resolved_cache_id,
+                nodeId,
+                format,
+                concert_name=concertName,
             )
         except FileNotFoundError:
             if not replayId:
                 raise HTTPException(status_code=404, detail="OPL model not found")
     try:
         return ReplayDataStore.load_model_artifact(
-            REPLAY_ROOT, concertName, replayId, nodeId, format
+            REPLAY_ROOT,
+            concertName,
+            replayId,
+            nodeId,
+            format,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1364,7 +1172,7 @@ def cancel_run(run_id: str):
         run_state = runs[run_id]
         if run_state["status"] in ("success", "error", "canceled"):
             return _run_response(run_state, include_data=False)
-        executor = executors.get(run_id)
+        cancel_event = execution_cancel_events.get(run_id)
         run_state["status"] = "canceled"
         run_state["updatedAt"] = _now()
         run_state["finishedAt"] = _now()
@@ -1374,8 +1182,8 @@ def cancel_run(run_id: str):
                 node["error"] = "Run canceled."
                 node["updatedAt"] = _now()
 
-    if executor:
-        executor.cancel()
+    if cancel_event:
+        cancel_event.set()
 
     with runs_lock:
         return _run_response(runs[run_id], include_data=False)
@@ -1400,20 +1208,182 @@ def list_replays(concertName: Optional[str] = Query(default=None)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/replays/export")
+def export_replay(concertName: str = Query(...), replayId: str = Query(...)):
+    safe_concert = ReplayDataStore._safe_name(concertName)
+    safe_replay = ReplayDataStore._safe_replay_id(replayId)
+    replay_path = os.path.join(REPLAY_ROOT, safe_concert, safe_replay)
+    metadata_path = os.path.join(replay_path, "metadata.json")
+    if not os.path.isfile(metadata_path):
+        raise HTTPException(status_code=404, detail="replay not found")
+    os.makedirs(TMP_ROOT, exist_ok=True)
+    fd, archive_path = tempfile.mkstemp(prefix=f".{safe_replay}.", suffix=".zip", dir=TMP_ROOT)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for root, directories, files in os.walk(replay_path):
+                directories[:] = [item for item in directories if item != "cache"]
+                for file_name in files:
+                    path = os.path.join(root, file_name)
+                    archive.write(path, os.path.relpath(path, replay_path))
+        return FileResponse(
+            archive_path,
+            media_type="application/zip",
+            filename=f"{safe_concert}_{safe_replay}.zip",
+            background=BackgroundTask(os.unlink, archive_path),
+        )
+    except Exception:
+        try:
+            os.unlink(archive_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _imported_replay_id(replay_id, source_server_name):
+    safe_replay = ReplayDataStore._safe_replay_id(replay_id)
+    safe_source_server = ReplayDataStore._safe_name(source_server_name)
+    return ReplayDataStore._safe_replay_id(f"{safe_replay}_{safe_source_server}")
+
+
+@app.get("/replays/import-status")
+def replay_import_status(
+    concertName: str = Query(...),
+    replayId: str = Query(...),
+    sourceServerName: str = Query(...),
+):
+    safe_concert = ReplayDataStore._safe_name(concertName)
+    imported_replay_id = _imported_replay_id(replayId, sourceServerName)
+    replay_path = os.path.join(REPLAY_ROOT, safe_concert, imported_replay_id)
+    return {
+        "exists": os.path.isdir(replay_path),
+        "replayId": imported_replay_id,
+    }
+
+
+@app.post("/replays/import")
+async def import_replay(
+    request: Request,
+    concertName: str = Query(...),
+    replayId: str = Query(...),
+    sourceServerName: str = Query(...),
+):
+    safe_concert = ReplayDataStore._safe_name(concertName)
+    safe_replay = ReplayDataStore._safe_replay_id(replayId)
+    imported_replay_id = _imported_replay_id(safe_replay, sourceServerName)
+    concert_path = os.path.join(REPLAY_ROOT, safe_concert)
+    final_path = os.path.join(concert_path, imported_replay_id)
+    if os.path.exists(final_path):
+        return {"imported": False, "replayId": imported_replay_id}
+    os.makedirs(concert_path, exist_ok=True)
+    os.makedirs(TMP_ROOT, exist_ok=True)
+    fd, archive_path = tempfile.mkstemp(prefix=f".{safe_replay}.", suffix=".zip", dir=TMP_ROOT)
+    extract_path = tempfile.mkdtemp(prefix=f".{safe_replay}.", dir=concert_path)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            async for chunk in request.stream():
+                file.write(chunk)
+            file.flush()
+            os.fsync(file.fileno())
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            for item in archive.infolist():
+                relative = item.filename.replace("\\", "/")
+                if item.is_dir():
+                    continue
+                parts = relative.split("/")
+                if not relative or relative.startswith("/") or any(part in {"", ".", ".."} for part in parts):
+                    raise ValueError(f"Invalid Replay archive path: {relative}")
+                if parts[0] == "cache":
+                    raise ValueError("Replay archive must not contain Run Cache data.")
+                target = os.path.abspath(os.path.join(extract_path, *parts))
+                if os.path.commonpath([os.path.abspath(extract_path), target]) != os.path.abspath(extract_path):
+                    raise ValueError(f"Invalid Replay archive path: {relative}")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with archive.open(item, "r") as source, open(target, "wb") as destination:
+                    shutil.copyfileobj(source, destination)
+        metadata = ReplayDataStore._load_metadata(extract_path)
+        if metadata.get("concertName") != safe_concert or metadata.get("id") != safe_replay:
+            raise ValueError("Replay archive metadata does not match concertName/replayId.")
+        metadata["id"] = imported_replay_id
+        metadata["importedFrom"] = {
+            "serverName": sourceServerName,
+            "replayId": safe_replay,
+        }
+        with open(os.path.join(extract_path, "metadata.json"), "w", encoding="utf-8") as file:
+            json.dump(metadata, file, ensure_ascii=False, allow_nan=True, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(extract_path, final_path)
+        extract_path = None
+        return {"imported": True, "replayId": imported_replay_id}
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        try:
+            os.unlink(archive_path)
+        except FileNotFoundError:
+            pass
+        if extract_path and os.path.isdir(extract_path):
+            shutil.rmtree(extract_path)
+
+
 @app.get("/replays/cache")
-def open_replay_cache(concertName: str = Query(...), replayId: str = Query(...)):
-    cache = CacheDataStore.latest_for_replay(REPLAY_ROOT, concertName, replayId)
-    if not cache.get("available"):
+def list_replay_caches(concertName: str = Query(...), replayId: str = Query(...)):
+    caches = CacheDataStore.list_for_replay(REPLAY_ROOT, concertName, replayId)
+    return {"caches": caches}
+
+
+@app.get("/replays/cache/{cache_id}")
+def open_replay_cache(
+    cache_id: str,
+    concertName: str = Query(...),
+    replayId: str = Query(...),
+):
+    caches = CacheDataStore.list_for_replay(REPLAY_ROOT, concertName, replayId)
+    if not any(item["cacheId"] == cache_id for item in caches):
         raise HTTPException(status_code=404, detail="cache not found")
-    return {"run": CacheDataStore.load_run(REPLAY_ROOT, cache["cacheId"])}
+    return {
+        "run": CacheDataStore.load_run(
+            REPLAY_ROOT,
+            cache_id,
+            concert_name=concertName,
+        )
+    }
 
 
 @app.delete("/replays/cache")
-def clear_replay_cache(concertName: str = Query(...), replayId: str = Query(...)):
-    deleted = CacheDataStore.clear_for_replay(REPLAY_ROOT, concertName, replayId)
+def clear_replay_cache(
+    concertName: str = Query(...),
+    replayId: str = Query(...),
+    cacheId: Optional[str] = Query(default=None),
+):
+    deleted = CacheDataStore.clear_for_replay(
+        REPLAY_ROOT,
+        concertName,
+        replayId,
+        cache_id=cacheId,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="cache not found")
     return {"deleted": True}
+
+
+@app.delete("/replays/cache/{cache_id}")
+def delete_replay_cache(
+    cache_id: str,
+    concertName: str = Query(...),
+    replayId: str = Query(...),
+):
+    caches = CacheDataStore.list_for_replay(REPLAY_ROOT, concertName, replayId)
+    if not any(item["cacheId"] == cache_id for item in caches):
+        raise HTTPException(status_code=404, detail="cache not found")
+    CacheDataStore.clear_for_replay(
+        REPLAY_ROOT,
+        concertName,
+        replayId,
+        cache_id=cache_id,
+    )
+    return {"deleted": True, "cacheId": cache_id}
 
 
 @app.get("/health")
@@ -1422,6 +1392,7 @@ def health():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     import uvicorn
 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

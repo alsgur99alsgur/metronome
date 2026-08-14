@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
-export default function ResourceEditor({ data, onChange, kind, write = false, apiBaseUrl }) {
+export default function ResourceEditor({ data, onChange, write = false, apiBaseUrl }) {
   const operation = data.operation || "append";
   const scope = data.scope || "stage";
   const [stageResources, setStageResources] = useState([]);
   const [columns, setColumns] = useState([]);
   const [schemaMessage, setSchemaMessage] = useState("Select a Stage resource.");
-  const resourceLabel = kind === "cache" ? "Cache" : "File";
+  const resourceLabel = "Cache";
 
   useEffect(() => {
     if (!apiBaseUrl) return undefined;
@@ -19,7 +19,6 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
       .then((body) => {
         setStageResources(
           (body.resources || [])
-            .filter((resource) => resource.kind === kind)
             .map((resource) => resource.name)
             .sort((left, right) => left.localeCompare(right)),
         );
@@ -28,7 +27,7 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
         if (error.name !== "AbortError") setStageResources([]);
       });
     return () => controller.abort();
-  }, [apiBaseUrl, kind, resourceLabel]);
+  }, [apiBaseUrl, resourceLabel]);
 
   useEffect(() => {
     const resourceName = data.resourceName || "";
@@ -39,7 +38,7 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
     }
     const controller = new AbortController();
     setSchemaMessage("Loading columns...");
-    fetch(`${apiBaseUrl}/stage-resources/${encodeURIComponent(kind)}/${encodeURIComponent(resourceName)}/schema`, { signal: controller.signal })
+    fetch(`${apiBaseUrl}/stage-resources/${encodeURIComponent(resourceName)}/schema`, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error("Failed to load columns.");
         return response.json();
@@ -55,7 +54,7 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
         }
       });
     return () => controller.abort();
-  }, [apiBaseUrl, data.resourceName, kind, scope]);
+  }, [apiBaseUrl, data.resourceName, scope]);
 
   const setScope = (nextScope) => {
     onChange({
@@ -94,7 +93,7 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
       ) : (
         <label className="field-label">
           {resourceLabel} Name
-          <input className="text-input resource-name-input" value={data.resourceName || ""} onChange={(event) => onChange({ ...data, resourceName: event.target.value })} placeholder={`${kind}_name`} />
+          <input className="text-input resource-name-input" value={data.resourceName || ""} onChange={(event) => onChange({ ...data, resourceName: event.target.value })} placeholder="cache_name" />
         </label>
       )}
       {write && (
@@ -120,13 +119,14 @@ export default function ResourceEditor({ data, onChange, kind, write = false, ap
           </div>
           {operation === "delete" && (
             <label className="field-label resource-query-field">
-              Pandas Query
+              Pandas Query Condition
               <input
                 className="text-input resource-name-input"
                 value={data.condition || ""}
                 onChange={(event) => onChange({ ...data, condition: event.target.value })}
-                placeholder={"status == 'DONE' and amount > 0"}
+                placeholder={"status == $target_status and amount >= $minimum_amount"}
               />
+              <span className="field-hint">Use $variable_name for Input and Global variables.</span>
             </label>
           )}
         </div>

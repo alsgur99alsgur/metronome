@@ -1,0 +1,51 @@
+.modal-backdrop.error-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(15 23 42 / 24%);
+}
+
+.error-dialog {
+  width: min(380px, calc(100vw - 32px));
+  border: 1px solid #d7dce2;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgb(15 23 42 / 28%);
+  color: #111827;
+  padding: 18px;
+}
+
+.error-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.error-dialog p {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.error-dialog .save-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.error-dialog button {
+  min-width: 64px;
+  height: 30px;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}

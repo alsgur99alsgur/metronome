@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const searchHeightCssVar = "--concert-search-height";
 const minSearchHeight = 140;
@@ -80,8 +80,8 @@ const searchableFields = (node) => {
         );
       }
     });
-  } else if (["cacheRead", "cacheWrite", "fileRead", "fileWrite"].includes(node.type)) {
-    fields.push(field("resourceName", node.type.startsWith("cache") ? "Cache name" : "File name", data.resourceName));
+  } else if (["cacheRead", "cacheWrite"].includes(node.type)) {
+    fields.push(field("resourceName", "Cache name", data.resourceName));
     if (node.type.endsWith("Write")) {
       fields.push(field("condition", "Delete condition", data.condition));
     }
@@ -145,7 +145,10 @@ export default function ConcertSearch({
   const [localSearchHeight, setLocalSearchHeight] = useState(220);
   const dragStartRef = useRef(null);
   const searchHeight = height ?? localSearchHeight;
-  const setSearchHeight = onHeightChange ?? setLocalSearchHeight;
+  const setSearchHeight = useCallback(
+    (nextHeight) => (onHeightChange ?? setLocalSearchHeight)(nextHeight),
+    [onHeightChange],
+  );
 
   useEffect(() => {
     document.documentElement.style.setProperty(searchHeightCssVar, `${searchHeight}px`);
@@ -175,7 +178,7 @@ export default function ConcertSearch({
       window.removeEventListener("pointerup", onPointerUp);
       document.body.classList.remove("resizing-concert-search");
     };
-  }, []);
+  }, [setSearchHeight]);
 
   const submitSearch = () => {
     setSubmittedTerm(inputTerm.trim());

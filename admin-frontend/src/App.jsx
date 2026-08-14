@@ -93,7 +93,7 @@ function ServerOpenDialog({ onClose, onOpen }) {
         </div>
         <div className="dialog-body">
           {loading && <div className="dialog-message">Loading servers…</div>}
-          {error && <div className="error-message">{error}</div>}
+          <MessageDialog type="error" message={error} onClose={() => setError("")} />
           {!loading && !error && servers.length === 0 && <div className="dialog-message">No servers are configured.</div>}
           {!loading && servers.length > 0 && (
             <label className="server-select-field">
@@ -367,7 +367,7 @@ export default function App() {
         <nav className="menu-bar" onClick={(event) => event.stopPropagation()}>
           <div className="menu-root">
             <button className="menu-button" type="button" onClick={() => setActiveMenu(activeMenu === "server" ? null : "server")}>Server</button>
-            {activeMenu === "server" && <div className="menu-popover"><button type="button" onClick={() => { setActiveMenu(null); setShowServerDialog(true); }}>Open</button><button type="button" disabled={!activeTab} onClick={() => activeTab && closeTab(activeTab.id)}>Close</button></div>}
+            {activeMenu === "server" && <div className="menu-popover"><button type="button" onClick={() => { setActiveMenu(null); setShowServerDialog(true); }}>Open</button></div>}
           </div>
         </nav>
       </header>

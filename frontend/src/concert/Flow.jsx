@@ -8,6 +8,7 @@ import ConcertTabView from "./ConcertTabView";
 import DeployDialog from "./DeployDialog";
 import ConcertManagerDialog from "./ConcertManagerDialog";
 import StageResourcesDialog from "./StageResourcesDialog";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 const queryLocalPort = Number(
   new URLSearchParams(window.location.search).get("localPort"),
@@ -19,6 +20,7 @@ const localServerPort =
 const localApiBaseUrl = `http://localhost:${localServerPort}`;
 
 export default function Flow() {
+  const { showError } = useErrorDialog();
   const tabViewRef = useRef(null);
   const resizeRef = useRef(null);
   const mainMenuRef = useRef(null);
@@ -45,7 +47,7 @@ export default function Flow() {
     if (nextServerName === selectedServerName) return true;
     const nextServer = servers.find((server) => server.name === nextServerName);
     if (!nextServer) {
-      window.alert(`Server not found: ${nextServerName}.`);
+      showError(`Server not found: ${nextServerName}.`);
       return false;
     }
     const nextApiBaseUrl = `http://${nextServer.host}:${nextServer.port}`;
@@ -58,7 +60,7 @@ export default function Flow() {
       setSelectedServerName(nextServerName);
       return true;
     } catch {
-      window.alert(`No response from server: ${nextServerName}.`);
+      showError(`No response from server: ${nextServerName}.`);
       return false;
     }
   };
@@ -178,7 +180,7 @@ export default function Flow() {
                   <strong>{selectedServerName}</strong>
                 </div>
                 <button onClick={() => { setActiveMenu(null); setShowStageResources(true); }}>
-                  Stage Resources
+                  Stage Caches
                 </button>
                 <button disabled={!hasActiveConcert} onClick={() => {
                   if (!tabViewRef.current?.hasActiveConcert()) return;
@@ -219,7 +221,7 @@ export default function Flow() {
                 refreshKey={concertListRefreshKey}
                 onClose={() => setShowConcertList(false)}
                 openKinds={["playing", "rehearsal", "backup"]}
-                onOpen={(name, item) => tabViewRef.current?.openDeploymentConcert(item).catch((error) => window.alert(error.message))}
+                onOpen={(name, item) => tabViewRef.current?.openDeploymentConcert(item).catch(showError)}
               />
             </div>
             <div

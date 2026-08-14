@@ -19,7 +19,6 @@
     "@monaco-editor/react": "^4.7.0",
     "@mui/icons-material": "^9.1.1",
     "@mui/material": "^9.1.2",
-    "axios": "^1.18.1",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

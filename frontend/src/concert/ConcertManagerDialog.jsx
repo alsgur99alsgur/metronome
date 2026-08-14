@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 import ConcertListPanel, { ConcertDirectoryTree, ConcertFolderCreate } from "./ConcertListPanel";
-import { folderOf } from "./ConcertFileTable";
+import { folderOf } from "./concertPathUtils";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 const responseError = async (response) => {
   const body = await response.json().catch(() => null);
@@ -9,6 +10,7 @@ const responseError = async (response) => {
 };
 
 export default function ConcertManagerDialog({ apiBaseUrl, serverName, onDeploymentChange, onClose }) {
+  const { showError } = useErrorDialog();
   const [selected, setSelected] = useState(null);
   const [deployments, setDeployments] = useState({ playings: [], rehearsals: [], backups: [] });
   const [directories, setDirectories] = useState([]);
@@ -19,6 +21,10 @@ export default function ConcertManagerDialog({ apiBaseUrl, serverName, onDeploym
   const [error, setError] = useState("");
   const [selectedDirectory, setSelectedDirectory] = useState("");
   const [listDirectories, setListDirectories] = useState([]);
+
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -83,7 +89,6 @@ export default function ConcertManagerDialog({ apiBaseUrl, serverName, onDeploym
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
       <section className="variable-dialog concert-manager" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Manager</h2></div></div>
-        {error && <div className="dialog-error">{error}</div>}
         <ConcertListPanel
           apiBaseUrl={apiBaseUrl}
           fixedSource="all"

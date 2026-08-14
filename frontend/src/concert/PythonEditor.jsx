@@ -8,26 +8,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import MergeTypeOutlinedIcon from "@mui/icons-material/MergeTypeOutlined";
 import PlaylistAddOutlinedIcon from "@mui/icons-material/PlaylistAddOutlined";
 import SortOutlinedIcon from "@mui/icons-material/SortOutlined";
-import { validateNodeName } from "./nameValidation";
-
-export const pythonTemplate = (name) =>
-  `def func_${validateNodeName(name)}(inputs):
-    """
-    inputs:
-        list[pandas.DataFrame]
-
-    return:
-        pandas.DataFrame
-    """
-
-    if inputs:
-        df = inputs[0]
-    else:
-        df = pd.DataFrame({"value": [1, 2, 3]})
-
-    result = df
-    return result
-`;
+import { pythonTemplate } from "./pythonTemplate";
 
 const pythonPresets = [
   {
@@ -325,16 +306,6 @@ function InputColumnsPanel({ inputDataframes = [] }) {
     inputDataframes.find((input) => input.id === activeInputId) ||
     inputDataframes[0] ||
     null;
-
-  useEffect(() => {
-    if (!inputDataframes.length) {
-      setActiveInputId(null);
-      return;
-    }
-    if (!inputDataframes.some((input) => input.id === activeInputId)) {
-      setActiveInputId(inputDataframes[0].id);
-    }
-  }, [activeInputId, inputDataframes]);
 
   return (
     <aside className="column-side-panel">

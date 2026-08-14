@@ -1,8 +1,11 @@
 import ctypes
 import json
+import multiprocessing
 import os
 import sys
 from pathlib import Path
+from threading import Thread
+import time
 
 
 def _initialize_data_directory():
@@ -29,6 +32,10 @@ def _initialize_data_directory():
                 "workers": 3,
                 "timeoutSeconds": 60,
             },
+            "storage": {
+                "retentionDays": 7,
+                "cacheMemoryLimitMb": 64,
+            },
         },
         "servers.json": [
             {"name": "Local", "host": "localhost", "port": 8000},
@@ -48,21 +55,46 @@ def _initialize_data_directory():
 
 
 def _configure_console(data_root):
-    config = json.loads((data_root / "config.json").read_text(encoding="utf-8"))
-    backend_config = config.get("backend", {})
-    if not isinstance(backend_config, dict):
-        raise ValueError("config.json backend must be an object.")
-    console_mode = backend_config.get("consoleMode", False)
+    from app_config import load_config
+
+    console_mode = load_config().get("backend", {}).get("consoleMode", False)
     if type(console_mode) is not bool:
         raise ValueError("config.json backend.consoleMode must be a boolean.")
-    if not console_mode or sys.platform != "win32":
+    if sys.platform != "win32":
+        return
+    kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+    console_window = kernel32.GetConsoleWindow()
+    if console_mode and not console_window:
+        if not kernel32.AllocConsole():
+            raise OSError("Failed to allocate the backend console.")
+        sys.stdin = open("CONIN$", "r", encoding="utf-8")
+        sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        console_window = kernel32.GetConsoleWindow()
+    if console_window:
+        user32.ShowWindow(console_window, 5 if console_mode else 0)
+
+
+def _watch_console_mode(data_root):
+    if sys.platform != "win32":
         return
 
-    if not ctypes.windll.kernel32.AllocConsole():
-        raise OSError("Failed to allocate the backend console.")
-    sys.stdin = open("CONIN$", "r", encoding="utf-8")
-    sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
-    sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+    def watch():
+        previous = None
+        while True:
+            try:
+                from app_config import load_config
+
+                current = load_config().get("backend", {}).get("consoleMode", False)
+                if current != previous:
+                    _configure_console(data_root)
+                    previous = current
+            except Exception as exc:
+                print(f"Console configuration reload failed: {exc}")
+            time.sleep(1)
+
+    Thread(target=watch, name="console-config", daemon=True).start()
 
 
 def _local_server_port(data_root):
@@ -79,8 +111,10 @@ def _local_server_port(data_root):
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     data_root = _initialize_data_directory()
     _configure_console(data_root)
+    _watch_console_mode(data_root)
     local_port = _local_server_port(data_root)
 
     import uvicorn

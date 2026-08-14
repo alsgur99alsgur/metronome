@@ -17,5 +17,11 @@ export default defineConfig([
       globals: { ...globals.browser, ...globals.node },
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // Data-loading effects update state asynchronously after fetch completion.
+      'react-hooks/set-state-in-effect': 'off',
+      // Some editor modules intentionally export pure builders alongside their UI.
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])

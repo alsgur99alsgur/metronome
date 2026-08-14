@@ -13,25 +13,6 @@ const normalizeVariableName = (value) => {
   return name ? `$${safeName(name)}` : "$var";
 };
 
-const formatParamSummary = (replay) => {
-  const params = replay.calledParams || replay.inputParams || {};
-  const inputNames = (replay.inputVariables || [])
-    .map((item) => normalizeVariableName(item.name).replace(/^\$+/, ""))
-    .filter(Boolean);
-  const pairs = inputNames
-    .map((name) => [name, params?.[name]])
-    .filter(([, value]) => value !== undefined && value !== null);
-
-  if (pairs.length === 0) return "No params";
-  return pairs
-    .slice(0, 3)
-    .map(([name, value]) => {
-      const text = typeof value === "string" ? value : JSON.stringify(value);
-      return `$${name}=${text}`;
-    })
-    .join(", ");
-};
-
 const formatParamValue = (value) => {
   if (value === undefined) return "";
   if (value === null) return "null";
@@ -133,37 +114,29 @@ const collapsedTreeState = (tree, openReplayId = "") => {
 
 const inputParamRows = (replay) => {
   if (!replay) return [];
-  const rows = [];
-  const seen = new Set();
-  const calledParams =
+  const rawCalledParams =
     replay.calledParams && Object.keys(replay.calledParams).length
       ? replay.calledParams
       : replay.inputParams || {};
-  (replay.inputVariables || []).forEach((item) => {
+  const calledParams = Object.fromEntries(
+    Object.entries(rawCalledParams).map(([name, value]) => [
+      String(name).replace(/^\$+/, ""),
+      value,
+    ]),
+  );
+  return (replay.inputVariables || []).map((item) => {
     const name = normalizeVariableName(item.name).replace(/^\$+/, "");
-    if (!name || seen.has(name)) return;
-    seen.add(name);
-    rows.push({
+    return {
       name: `$${name}`,
       value: formatParamValue(calledParams?.[name]),
       defaultValue: formatParamValue(item.defaultValue),
-    });
+    };
   });
-  Object.entries(calledParams || {}).forEach(([name, value]) => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    rows.push({
-      name: `$${name}`,
-      value: formatParamValue(value),
-      defaultValue: "",
-    });
-  });
-  return rows;
 };
 
 const callerParamRows = (replay) =>
   Object.entries(replay?.callerParams || {}).map(([name, value]) => ({
-    name: `$${name}`,
+    name: `$${String(name).replace(/^\$+/, "")}`,
     value: formatParamValue(value),
   }));
 
@@ -195,8 +168,6 @@ export default function ReplayDialog({
   const [draftReplayId, setDraftReplayId] = useState(selectedReplayId || "");
   const [collapsedDates, setCollapsedDates] = useState(() => new Set());
   const [collapsedHours, setCollapsedHours] = useState(() => new Set());
-  const selectedIndex = replays.findIndex((replay) => replay.id === draftReplayId);
-  const selectedReplay = selectedIndex >= 0 ? replays[selectedIndex] : null;
   const rows = useMemo(
     () =>
       replays.map((replay) => ({
@@ -208,6 +179,16 @@ export default function ReplayDialog({
     [replays],
   );
   const tree = useMemo(() => buildReplayTree(rows), [rows]);
+  const orderedReplays = useMemo(
+    () => tree.flatMap((dateGroup) =>
+      dateGroup.hours.flatMap((hourGroup) => hourGroup.items),
+    ),
+    [tree],
+  );
+  const selectedIndex = orderedReplays.findIndex(
+    (replay) => replay.id === draftReplayId,
+  );
+  const selectedReplay = selectedIndex >= 0 ? orderedReplays[selectedIndex] : null;
   const paramRows = useMemo(
     () => inputParamRows(selectedReplay),
     [selectedReplay],
@@ -225,17 +206,30 @@ export default function ReplayDialog({
     const nextState = collapsedTreeState(tree, draftReplayId);
     setCollapsedDates(nextState.collapsedDates);
     setCollapsedHours(nextState.collapsedHours);
-    dialogRef.current
-      ?.querySelector(".replay-point-row.active")
-      ?.scrollIntoView({ block: "nearest" });
   }, [draftReplayId, tree]);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      dialogRef.current
+        ?.querySelector(".replay-point-row.active")
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [collapsedDates, collapsedHours, draftReplayId]);
+
   const moveSelection = (offset) => {
-    if (!replays.length) return;
-    const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
-    const nextIndex =
-      (currentIndex + offset + replays.length) % replays.length;
-    setDraftReplayId(replays[nextIndex].id);
+    if (!orderedReplays.length) return;
+    if (selectedIndex < 0) {
+      setDraftReplayId(
+        orderedReplays[offset < 0 ? orderedReplays.length - 1 : 0].id,
+      );
+      return;
+    }
+    const nextIndex = Math.max(
+      0,
+      Math.min(orderedReplays.length - 1, selectedIndex + offset),
+    );
+    setDraftReplayId(orderedReplays[nextIndex].id);
   };
 
   const toggleDate = (dateKey) => {
@@ -270,7 +264,6 @@ export default function ReplayDialog({
 
   const confirmCacheOpen = () => {
     if (!selectedReplay?.cache?.available) return;
-    onSelect(draftReplayId);
     onCacheOpen?.(selectedReplay);
   };
 
@@ -280,6 +273,12 @@ export default function ReplayDialog({
   };
 
   const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.target.closest?.("select")) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       moveSelection(1);
@@ -292,22 +291,18 @@ export default function ReplayDialog({
     }
     if (event.key === "Home") {
       event.preventDefault();
-      if (replays[0]) setDraftReplayId(replays[0].id);
+      if (orderedReplays[0]) setDraftReplayId(orderedReplays[0].id);
       return;
     }
     if (event.key === "End") {
       event.preventDefault();
-      if (replays.at(-1)) setDraftReplayId(replays.at(-1).id);
+      if (orderedReplays.at(-1)) setDraftReplayId(orderedReplays.at(-1).id);
       return;
     }
     if (event.key === "Enter" && draftReplayId) {
       event.preventDefault();
       confirmSelection();
       return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
     }
   };
 
@@ -356,8 +351,10 @@ export default function ReplayDialog({
               <>
                 <div className="replay-point-header">
                   <span>Date / Time</span>
-                  <span>Source</span>
-                  <span>Caller</span>
+                  <span>Version</span>
+                  <span>Play Type</span>
+                  <span>Player</span>
+                  <span>Owner</span>
                 </div>
                 <div className="replay-tree-view" role="tree" aria-label="Replay points">
                   {tree.map((dateGroup) => {
@@ -411,11 +408,17 @@ export default function ReplayDialog({
                                           <span className="replay-point-id" title={replay.id}>
                                             {formatReplayTime(replay.treeLeaf)}
                                           </span>
+                                          <span className="replay-point-version" title={replay.version || "-"}>
+                                            {replay.version || "-"}
+                                          </span>
                                           <span className={`replay-point-source ${replay.sourceKind || ""}`}>
                                             {replay.sourceSummary}
                                           </span>
                                           <span className="replay-point-caller" title={replay.callerSummary}>
                                             {replay.callerSummary}
+                                          </span>
+                                          <span className="replay-point-owner" title={replay.owner || "Local"}>
+                                            {replay.owner || "Local"}
                                           </span>
                                         </button>
                                       ))}

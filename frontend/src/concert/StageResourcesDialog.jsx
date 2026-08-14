@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { openDataWindow } from "./DataViewerWindow";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 const responseError = async (response) => {
   const body = await response.json().catch(() => null);
@@ -17,14 +18,17 @@ const emptyDataframe = {
 };
 
 export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }) {
+  const { showError } = useErrorDialog();
   const [resources, setResources] = useState([]);
-  const [kind, setKind] = useState("cache");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleteName, setDeleteName] = useState("");
   const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Escape") return;
@@ -55,7 +59,7 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
     try {
       const response = await fetch(`${apiBaseUrl}/stage-resources`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, name }),
+        body: JSON.stringify({ name }),
       });
       if (!response.ok) throw new Error(await responseError(response));
       setName(""); await load();
@@ -64,20 +68,20 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
   const remove = async (resource) => {
     setBusy(true); setError("");
     try {
-      const response = await fetch(`${apiBaseUrl}/stage-resources/${encodeURIComponent(resource.kind)}/${encodeURIComponent(resource.name)}`, { method: "DELETE" });
+      const response = await fetch(`${apiBaseUrl}/stage-resources/${encodeURIComponent(resource.name)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(await response.text());
       setPendingDelete(null); setDeleteName(""); await load();
     } catch (nextError) { setError(nextError.message); } finally { setBusy(false); }
   };
   const view = async (resource) => {
-    const viewer = window.open("", `stage-resource-${resource.kind}-${resource.name}`, "popup=yes,width=1240,height=820,menubar=no,toolbar=no,location=no");
+    const viewer = window.open("", `stage-cache-${resource.name}`, "popup=yes,width=1240,height=820,menubar=no,toolbar=no,location=no");
     if (!viewer) { setError("Popup was blocked. Allow popups to view Stage resources."); return; }
     setError("");
     try {
-      const response = await fetch(`${apiBaseUrl}/stage-resources/${encodeURIComponent(resource.kind)}/${encodeURIComponent(resource.name)}/data`);
+      const response = await fetch(`${apiBaseUrl}/stage-resources/${encodeURIComponent(resource.name)}/data`);
       if (!response.ok && response.status !== 404) throw new Error(await responseError(response));
       openDataWindow(
-        { id: `stage-${resource.kind}-${resource.name}`, data: { name: resource.name } },
+        { id: `stage-cache-${resource.name}`, data: { name: resource.name } },
         { result: response.ok ? await response.json() : emptyDataframe },
         viewer,
       );
@@ -86,16 +90,14 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <section className="variable-dialog stage-resources-dialog" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Resources</h2></div></div>
+        <div className="dialog-header"><div><div className="eyebrow">{serverName}</div><h2>Stage Caches</h2></div></div>
         <div className="stage-resource-create">
-          <select value={kind} onChange={(event) => setKind(event.target.value)}><option value="cache">Cache</option><option value="file">File</option></select>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="resource_name" />
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="cache_name" />
           <button disabled={busy || !name.trim()} onClick={create}>Create</button>
         </div>
-        {error && <div className="dialog-error">{error}</div>}
         <div className="stage-resource-list">
-          {resources.map((resource) => <div className="stage-resource-row" key={`${resource.kind}:${resource.name}`}><span>{resource.kind === "cache" ? "Cache" : "File"}</span><strong>{resource.name}</strong><button disabled={busy} onClick={() => view(resource)}>View</button><button className="danger-button" disabled={busy} onClick={() => { setPendingDelete(resource); setDeleteName(""); }}>Delete</button></div>)}
-          {!resources.length && <p className="muted">No Stage resources.</p>}
+          {resources.map((resource) => <div className="stage-resource-row" key={resource.name}><span>Cache</span><strong>{resource.name}</strong><button disabled={busy} onClick={() => view(resource)}>View</button><button className="danger-button" disabled={busy} onClick={() => { setPendingDelete(resource); setDeleteName(""); }}>Delete</button></div>)}
+          {!resources.length && <p className="muted">No Stage Caches.</p>}
         </div>
       </section>
       {pendingDelete && (

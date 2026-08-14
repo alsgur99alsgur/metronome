@@ -10,7 +10,7 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-from oracle_client import execute_oracle_query_records, execute_oracle_write_records
+from oracle_client import bind_names_from_sql, execute_oracle_query_records, execute_oracle_write_records
 from opl_builder import build_and_solve_opl
 from task import Task
 from variable_types import runtime_params as _typed_runtime_params
@@ -24,13 +24,12 @@ SINGLE_PARENT_TARGET_TYPES = {
     "dbRead",
     "dbWrite",
     "cacheWrite",
-    "fileWrite",
     "loopIn",
     "loopOut",
 }
 NO_PARENT_TARGET_TYPES = {"concertInput"}
 NO_CHILD_SOURCE_TYPES = {"concertOutput"}
-REPLAY_TASK_TYPES = {"dbRead", "concertInput", "concert", "cacheRead", "fileRead", "opl"}
+REPLAY_TASK_TYPES = {"dbRead", "concertInput", "concert", "cacheRead", "opl"}
 LOOP_NODE_TYPES = {"loopIn", "loopOut"}
 
 
@@ -73,6 +72,54 @@ def _rewrite_python_variables(code):
         rewritten.append((token.type, token.string))
         index += 1
     return tokenize.untokenize(rewritten)
+
+
+def _python_variable_names(code):
+    tokens = list(tokenize.generate_tokens(io.StringIO(code or "").readline))
+    names = set()
+    for index, token in enumerate(tokens[:-1]):
+        if token.string == "$" and tokens[index + 1].type == tokenize.NAME:
+            names.add(tokens[index + 1].string)
+    return names
+
+
+def _exact_variable_names(value):
+    if isinstance(value, str):
+        match = _CONCERT_VAR_PATTERN.fullmatch(value.strip())
+        return {match.group(1)} if match else set()
+    if isinstance(value, list):
+        return set().union(*(_exact_variable_names(item) for item in value), set())
+    if isinstance(value, dict):
+        return set().union(*(_exact_variable_names(item) for item in value.values()), set())
+    return set()
+
+
+def _validate_node_variable_references(node, params):
+    data = node.get("data") or {}
+    node_type = node.get("type")
+    node_name = data.get("name") or node.get("id") or "<unknown>"
+    references = []
+    if node_type in {"dbRead", "dbWrite"}:
+        references.append(("sql", set(_CONCERT_VAR_PATTERN.findall(data.get("sql", "")))))
+        references.append(("connection", _exact_variable_names(data.get("connection"))))
+    elif node_type == "python":
+        references.append(("code", _python_variable_names(data.get("code", ""))))
+    elif node_type == "cacheWrite":
+        references.append(("condition", set(_CONCERT_VAR_PATTERN.findall(data.get("condition", "")))))
+    elif node_type == "concert":
+        references.append(("inputParams", _exact_variable_names(_parse_mapping(data.get("inputParams", {})))))
+    elif node_type in {"loopIn", "loopOut"}:
+        references.append(("maxIterations", _exact_variable_names(data.get("maxIterations"))))
+        references.append(("stopConditions", _exact_variable_names(data.get("stopConditions", []))))
+
+    defined = set(params) - {"__input_dataframes"}
+    for field, names in references:
+        missing = sorted(names - defined)
+        if missing:
+            variables = ", ".join(f"${name}" for name in missing)
+            raise ValueError(
+                f"Undefined Concert variable in node {node_name} ({field}): {variables}"
+            )
 
 
 @lru_cache(maxsize=4096)
@@ -183,7 +230,7 @@ def _execute_task_graph(task_map, replay_data_store=None):
     return last_result
 
 
-def _bind_records_from_inputs(inputs, params):
+def _bind_records_from_inputs(inputs, params, bind_names):
     base_params = params or {}
     if not inputs:
         return [base_params]
@@ -192,7 +239,11 @@ def _bind_records_from_inputs(inputs, params):
     if not isinstance(input_df, pd.DataFrame):
         raise TypeError("DB Read node expects the first input to be a pandas DataFrame.")
 
-    records = input_df.where(pd.notnull(input_df), None).to_dict(orient="records")
+    bind_columns = [column for column in input_df.columns if column in bind_names]
+    if not bind_columns:
+        return [base_params]
+    selected = input_df.loc[:, bind_columns]
+    records = selected.where(pd.notnull(selected), None).to_dict(orient="records")
     if not records:
         return [base_params]
 
@@ -200,12 +251,14 @@ def _bind_records_from_inputs(inputs, params):
 
 
 def _build_db_read_task(task_id, name, data, params):
-    sql = _rewrite_sql_variables(data.get("sql", ""))
+    source_sql = data.get("sql", "")
+    dataframe_bind_names = bind_names_from_sql(source_sql)
+    sql = _rewrite_sql_variables(source_sql)
 
     def db_read(inputs):
         print(f"QUERY {name}")
         connection = _resolve_connection(data.get("connection", ""), params)
-        bind_records = _bind_records_from_inputs(inputs, params)
+        bind_records = _bind_records_from_inputs(inputs, params, dataframe_bind_names)
         result = execute_oracle_query_records(connection, sql, bind_records)
         if result.attrs.get("pm_fallback"):
             print(f"PM SKIP {name}: Oracle connection failed; using cached empty schema.")
@@ -255,6 +308,7 @@ def _build_opl_task(task_id, name, data):
             input_dataframes,
             artifact_dirs=task.model_artifact_dirs,
             node_id=task.id,
+            artifact_key=task.model_artifact_key,
         )
 
     task = Task(task_id, name, "opl", opl)
@@ -262,7 +316,9 @@ def _build_opl_task(task_id, name, data):
 
 
 def _build_db_write_task(task_id, name, data, params):
-    sql = _rewrite_sql_variables(data.get("sql", ""))
+    source_sql = data.get("sql", "")
+    dataframe_bind_names = bind_names_from_sql(source_sql)
+    sql = _rewrite_sql_variables(source_sql)
 
     def db_write(inputs):
         connection = _resolve_connection(data.get("connection", ""), params)
@@ -273,7 +329,10 @@ def _build_db_write_task(task_id, name, data, params):
             result = inputs[0]
             if not isinstance(result, pd.DataFrame):
                 raise TypeError("DB Write node expects the first input to be a pandas DataFrame.")
-            bind_records = result.where(pd.notnull(result), None).to_dict(orient="records")
+            bind_columns = [column for column in result.columns if column in dataframe_bind_names]
+            selected = result.loc[:, bind_columns]
+            records = selected.where(pd.notnull(selected), None).to_dict(orient="records")
+            bind_records = [{**params, **record} for record in records]
 
         row_count = execute_oracle_write_records(connection, sql, bind_records)
         if row_count is None:
@@ -307,18 +366,22 @@ def _build_output_task(task_id, name, data, params):
 
 
 def _build_resource_read_task(task_id, name, data, resource_store, run_id):
-    kind = "cache" if data.get("resourceKind") == "cache" else "file"
     scope = data.get("scope", "")
     resource_name = data.get("resourceName", "")
+    task = None
 
     def read_resource(_inputs):
-        return resource_store.read(kind, scope, resource_name, run_id=run_id)
+        dataframe, file_key = resource_store.read(scope, resource_name, run_id=run_id)
+        task.cache_scope = scope
+        task.cache_file_key = file_key
+        return dataframe
 
-    return Task(task_id, name, f"{kind}Read", read_resource)
+    task = Task(task_id, name, "cacheRead", read_resource)
+    task.cache_scope = scope
+    return task
 
 
 def _build_resource_write_task(task_id, name, data, params, resource_store, run_id):
-    kind = "cache" if data.get("resourceKind") == "cache" else "file"
     scope = data.get("scope", "")
     resource_name = data.get("resourceName", "")
     operation = data.get("operation", "")
@@ -327,10 +390,9 @@ def _build_resource_write_task(task_id, name, data, params, resource_store, run_
     def write_resource(inputs):
         if operation == "append":
             if len(inputs) != 1:
-                raise ValueError(f"{kind.title()} append requires exactly one input DataFrame.")
+                raise ValueError("Cache append requires exactly one input DataFrame.")
             input_dataframe = inputs[0]
             resource_store.append(
-                kind,
                 scope,
                 resource_name,
                 input_dataframe,
@@ -339,9 +401,8 @@ def _build_resource_write_task(task_id, name, data, params, resource_store, run_
             return input_dataframe
         if operation == "delete":
             if len(inputs) > 1:
-                raise ValueError(f"{kind.title()} delete accepts at most one input DataFrame.")
+                raise ValueError("Cache delete accepts at most one input DataFrame.")
             resource_store.delete_rows(
-                kind,
                 scope,
                 resource_name,
                 condition,
@@ -349,9 +410,9 @@ def _build_resource_write_task(task_id, name, data, params, resource_store, run_
                 run_id=run_id,
             )
             return inputs[0] if inputs else pd.DataFrame()
-        raise ValueError(f"Invalid {kind} write operation: {operation}")
+        raise ValueError(f"Invalid Cache write operation: {operation}")
 
-    return Task(task_id, name, f"{kind}Write", write_resource)
+    return Task(task_id, name, "cacheWrite", write_resource)
 
 
 def _build_loop_in_task(task_id, name, data, params):
@@ -418,14 +479,20 @@ def _build_concert_call_task(
         sub_params = _runtime_params(
             concert["globalVariables"],
             called_input_variables,
-            {**params, **resolved_input_params, "__input_dataframes": inputs},
+            resolved_input_params,
         )
+        sub_params["__input_dataframes"] = inputs
         called_params = _params_for_variables(called_input_variables, sub_params)
-        sub_replay_data_store = ReplayDataStore(replay_root, concert_name=resolved_concert_name)
+        sub_replay_data_store = ReplayDataStore(
+            replay_root,
+            concert_name=resolved_concert_name,
+            resource_store=resource_store,
+        )
         sub_replay_data_store.save_metadata(
             {
                 "id": sub_replay_data_store.replay_id,
                 "concertName": resolved_concert_name,
+                "version": concert.get("version", ""),
                 "createdAt": datetime.utcnow().isoformat() + "Z",
                 "trigger": "concert-call",
                 "sourceKind": "concert-call",
@@ -441,7 +508,6 @@ def _build_concert_call_task(
                 "params": _json_safe_mapping(called_params),
                 "calledParams": _json_safe_mapping(called_params),
                 "callerParams": _json_safe_mapping(caller_input_params),
-                "globalVariables": concert["globalVariables"],
                 "inputVariables": called_input_variables,
             }
         )
@@ -615,6 +681,14 @@ def build_concert(
     resource_store=None,
     run_id=None,
 ):
+    nodes = [node for node in nodes if node.get("type") != "text"]
+    executable_node_ids = {node["id"] for node in nodes}
+    edges = [
+        edge
+        for edge in edges
+        if edge.get("source") in executable_node_ids
+        and edge.get("target") in executable_node_ids
+    ]
     params = params or {}
     caller_input_params = caller_input_params or {}
     call_stack = call_stack or []
@@ -622,6 +696,9 @@ def build_concert(
     task_map = {}
     node_type_by_id = {}
     node_by_id = {node["id"]: node for node in nodes}
+
+    for node in nodes:
+        _validate_node_variable_references(node, params)
 
     for node in nodes:
         node_type = node["type"]
@@ -645,13 +722,13 @@ def build_concert(
             task_map[task_id] = _build_loop_in_task(task_id, name, data, params)
         elif node_type == "loopOut":
             task_map[task_id] = _build_loop_out_task(task_id, name, data, params)
-        elif node_type in {"cacheRead", "fileRead"}:
+        elif node_type == "cacheRead":
             if resource_store is None:
                 raise RuntimeError("Resource store is not configured.")
             task_map[task_id] = _build_resource_read_task(
                 task_id, name, data, resource_store, run_id
             )
-        elif node_type in {"cacheWrite", "fileWrite"}:
+        elif node_type == "cacheWrite":
             if resource_store is None:
                 raise RuntimeError("Resource store is not configured.")
             task_map[task_id] = _build_resource_write_task(

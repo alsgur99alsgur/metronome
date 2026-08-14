@@ -1,23 +1,24 @@
 import { useEffect, useState } from "react";
 
-import { ConcertFileTable, folderRows } from "./ConcertFileTable";
+import { ConcertFileTable } from "./ConcertFileTable";
+import { folderRows } from "./concertPathUtils";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 export function ConcertFolderCreate({ apiBaseUrl, parentDirectory, onCreated, children }) {
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { showError } = useErrorDialog();
 
   const create = async () => {
     const folderName = name.trim();
     if (!folderName) return;
-    if (!/^[A-Za-z0-9_.-]+$/.test(folderName)) {
-      setError("Folder name may contain only letters, numbers, '_', '-' or '.'.");
+    if (!/^[A-Za-z0-9_]+$/.test(folderName)) {
+      showError("Folder name may contain only English letters, numbers, and underscores.");
       return;
     }
     const directory = [parentDirectory, folderName].filter(Boolean).join("/");
     setBusy(true);
-    setError("");
     try {
       const response = await fetch(`${apiBaseUrl}/deployments/directories`, {
         method: "POST",
@@ -30,7 +31,7 @@ export function ConcertFolderCreate({ apiBaseUrl, parentDirectory, onCreated, ch
       setIsEditing(false);
       onCreated?.(body?.directory || directory);
     } catch (nextError) {
-      setError(nextError.message);
+      showError(nextError);
     } finally {
       setBusy(false);
     }
@@ -51,12 +52,11 @@ export function ConcertFolderCreate({ apiBaseUrl, parentDirectory, onCreated, ch
                 event.stopPropagation();
                 setIsEditing(false);
                 setName("");
-                setError("");
               }
             }}
             placeholder="folder_name"
           />
-          <button disabled={busy} onClick={() => { setIsEditing(false); setName(""); setError(""); }}>Cancel</button>
+          <button disabled={busy} onClick={() => { setIsEditing(false); setName(""); }}>Cancel</button>
           <button className="primary-button" disabled={busy || !name.trim()} onClick={create}>Create</button>
         </>
       ) : (
@@ -65,7 +65,6 @@ export function ConcertFolderCreate({ apiBaseUrl, parentDirectory, onCreated, ch
           {children}
         </>
       )}
-      {error && <span className="dialog-error">{error}</span>}
     </div>
   );
 }
@@ -89,7 +88,7 @@ export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directo
   const [deployments, setDeployments] = useState({ playings: [], rehearsals: [], backups: [] });
   const [directory, setDirectory] = useState("");
   const [source, setSource] = useState(fixedSource || "all");
-  const [error, setError] = useState("");
+  const { showError } = useErrorDialog();
   const activeDirectory = directoryValue ?? directory;
   const changeDirectory = (nextDirectory) => {
     setDirectory(nextDirectory);
@@ -112,10 +111,11 @@ export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directo
       });
       onDataChange?.(deploymentBody);
       if (directoryValue === undefined) setDirectory("");
-      setError("");
-    }).catch((nextError) => active && setError(nextError.message));
+    }).catch((nextError) => {
+      if (active) showError(nextError);
+    });
     return () => { active = false; };
-  }, [apiBaseUrl, refreshKey, onDataChange]);
+  }, [apiBaseUrl, directoryValue, onDataChange, onDirectoriesChange, refreshKey, showError]);
 
   const concerts = source === "all"
     ? [...deployments.playings, ...deployments.rehearsals, ...deployments.backups]
@@ -143,7 +143,7 @@ export default function ConcertListPanel({ apiBaseUrl, fixedSource = "", directo
       <div className="concert-list-browser">
         <ConcertDirectoryTree directories={directories} directory={activeDirectory} onChange={changeDirectory} counts={directoryCounts} />
         <div className="concert-list-files">
-          {error ? <div className="dialog-error">{error}</div> : <ConcertFileTable concerts={concerts} directory={activeDirectory} onOpen={onOpen} openKinds={openKinds} onSelect={onSelect} selectedKey={selectedKey} onPromote={onPromote} onRollback={onRollback} onMove={onMove} canMove={canMove} onDelete={onDelete} busy={busy} />}
+          <ConcertFileTable concerts={concerts} directory={activeDirectory} onOpen={onOpen} openKinds={openKinds} onSelect={onSelect} selectedKey={selectedKey} onPromote={onPromote} onRollback={onRollback} onMove={onMove} canMove={canMove} onDelete={onDelete} busy={busy} />
         </div>
       </div>
     </aside>

@@ -27,24 +27,30 @@ import "./Flow.css";
 
 import CenterEdge from "./CenterEdge";
 import ConcertCallEditor from "./ConcertCallEditor";
+import ConcertNodeContextMenu from "./ConcertNodeContextMenu";
 import ConcertOutputPanel from "./ConcertOutputPanel";
 import ConcertSearch from "./ConcertSearch";
 import { openDataWindow } from "./DataViewerWindow";
 import InputEditor from "./InputEditor";
+import NodePalette from "./NodePalette";
 import OutputEditor from "./OutputEditor";
 import OplEditor, { buildPyomoCode } from "./OplEditor";
 import DbEditor from "./DbEditor";
 import ResourceEditor from "./ResourceEditor";
-import PythonEditor, { pythonTemplate } from "./PythonEditor";
+import PythonEditor from "./PythonEditor";
+import { pythonTemplate } from "./pythonTemplate";
+import TextEditor from "./TextEditor";
+import TextNodeResizeContext from "./TextNodeResizeContext";
 import ReplayDialog from "./ReplayDialog";
+import RunCacheDialog from "./RunCacheDialog";
 import RunParamsDialog from "./RunParamsDialog";
 import RunningDialog from "./RunningDialog";
 import SaveChangesDialog from "./SaveChangesDialog";
 import VariablesDialog from "./VariablesDialog";
 import { coerceVariableValue } from "./variableTypes";
-import { nodeIcon, nodeStyle } from "./Node";
 import { nodeTypes } from "./nodeTypes";
 import { concertBaseName, validateConcertName, validateConcertPath, validateNodeName } from "./nameValidation";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 const makeId = () => crypto.randomUUID();
 let lastNodeIdBase = "";
@@ -106,8 +112,11 @@ const safeName = (value) => {
 
 const safeConcertPathName = validateConcertPath;
 
+const edgeId = (source, target) => `${source}-${target}`;
+
 const normalizeEdge = (edge) => ({
   ...edge,
+  id: edgeId(edge.source, edge.target),
   type: "center",
   markerEnd: { type: MarkerType.ArrowClosed },
 });
@@ -209,9 +218,13 @@ const isSameNodePair = (edge, source, target) =>
   (edge.source === source && edge.target === target) ||
   (edge.source === target && edge.target === source);
 
-const singleParentTargetTypes = new Set(["concert", "concertOutput", "dbRead", "dbWrite", "cacheWrite", "fileWrite", "loopIn", "loopOut"]);
+const singleParentTargetTypes = new Set(["concert", "concertOutput", "dbRead", "dbWrite", "cacheWrite", "loopIn", "loopOut"]);
 const noParentTargetTypes = new Set(["concertInput"]);
 const noChildSourceTypes = new Set(["concertOutput"]);
+const supportedNodeTypes = new Set([
+  "dbRead", "dbWrite", "python", "opl", "concert", "concertInput",
+  "concertOutput", "cacheRead", "cacheWrite", "loopIn", "loopOut", "text",
+]);
 
 const normalizeColumnMetadata = (columns = []) =>
   columns.map((column) =>
@@ -267,6 +280,15 @@ const hasPyomoCodeTextSelection = () => {
 };
 
 const getEditableSnapshot = (type, data = {}) => {
+  if (type === "text") {
+    return {
+      name: data.name || "",
+      text: data.text || "",
+      backgroundColor: data.backgroundColor || "#fffde7",
+      textColor: data.textColor || "#1f2937",
+      fontSize: data.fontSize || 16,
+    };
+  }
   if (type === "dbRead") {
     return {
       name: data.name || "",
@@ -322,10 +344,9 @@ const getEditableSnapshot = (type, data = {}) => {
       inputIndex: data.inputIndex || 0,
     };
   }
-  if (["cacheRead", "cacheWrite", "fileRead", "fileWrite"].includes(type)) {
+  if (["cacheRead", "cacheWrite"].includes(type)) {
     return {
       name: data.name || "",
-      resourceKind: data.resourceKind || (type.startsWith("cache") ? "cache" : "file"),
       scope: data.scope || "stage",
       resourceName: data.resourceName || "",
       operation: data.operation || (type.endsWith("Write") ? "append" : undefined),
@@ -361,31 +382,25 @@ const edgeTypes = {
   center: CenterEdge,
 };
 
-const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write", opl: "OPL" })[type] || type;
+const nodeTypeLabel = (type) => ({ dbRead: "DB Read", dbWrite: "DB Write", opl: "OPL", text: "Text" })[type] || type;
 
-const paletteGroups = [
-  [
-    { type: "dbRead", label: "DB Read" },
-    { type: "cacheRead", label: "Cache Read" },
-    { type: "fileRead", label: "File Read" },
-  ],
-  [{ type: "python", label: "Python" }],
-  [
-    { type: "dbWrite", label: "DB Write" },
-    { type: "cacheWrite", label: "Cache Write" },
-    { type: "fileWrite", label: "File Write" },
-  ],
-  [
-    { type: "concert", label: "Con Call" },
-    { type: "concertInput", label: "Input" },
-    { type: "concertOutput", label: "Output" },
-  ],
-  [
-    { type: "loopIn", label: "Loop In" },
-    { type: "loopOut", label: "Loop Out" },
-  ],
-  [{ type: "opl", label: "OPL" }],
-];
+const frontendOnlyNodeTypes = new Set(["text"]);
+const edgeZIndex = 1;
+const regularNodeZIndex = 2;
+
+const executableGraph = (targetNodes, targetEdges) => {
+  const executableNodes = targetNodes.filter(
+    (node) => !frontendOnlyNodeTypes.has(node.type),
+  );
+  const executableNodeIds = new Set(executableNodes.map((node) => node.id));
+  return {
+    nodes: executableNodes,
+    edges: targetEdges.filter(
+      (edge) =>
+        executableNodeIds.has(edge.source) && executableNodeIds.has(edge.target),
+    ),
+  };
+};
 
 const createNode = (type, index, position) => {
   const name = `${({ dbRead: "db_read", dbWrite: "db_write" })[type] || type}_${index}`;
@@ -439,8 +454,7 @@ const createNode = (type, index, position) => {
     data.inputIndex = 0;
   }
 
-  if (["cacheRead", "cacheWrite", "fileRead", "fileWrite"].includes(type)) {
-    data.resourceKind = type.startsWith("cache") ? "cache" : "file";
+  if (["cacheRead", "cacheWrite"].includes(type)) {
     data.scope = "stage";
     data.resourceName = "";
     if (type.endsWith("Write")) {
@@ -459,11 +473,21 @@ const createNode = (type, index, position) => {
     data.stopConditions = [];
   }
 
+  if (type === "text") {
+    data.text = "";
+    data.backgroundColor = "#fffde7";
+    data.textColor = "#1f2937";
+    data.fontSize = 16;
+  }
+
   return {
     id: makeNodeId(type),
     type,
     position,
     data,
+    ...(type === "text"
+      ? { style: { width: 200, height: 200 }, zIndex: 0 }
+      : { zIndex: regularNodeZIndex }),
   };
 };
 
@@ -521,26 +545,29 @@ const variableInputDefaults = (inputVariables) =>
     ]),
   );
 
-const cleanNodeDataForSave = (data = {}) => {
-  const {
-    runRows,
-    runDurationMs,
-    runLoopIterations,
-    isConnectMode,
-    outputColumns,
-    inputParamValues,
-    concertLoadError,
-    schemaError,
-    status,
-    ...rest
-  } = data;
-  return rest;
-};
+const omitKeys = (value, keys) => Object.fromEntries(
+  Object.entries(value || {}).filter(([key]) => !keys.has(key)),
+);
+
+const runtimeNodeDataKeySet = new Set(runtimeNodeDataKeys);
+const transientNodeKeys = new Set(["width", "height", "selected", "dragging", "positionAbsolute"]);
+const transientEdgeKeys = new Set(["type", "markerEnd", "sourceHandle", "targetHandle", "zIndex"]);
+
+const cleanNodeDataForSave = (data = {}) => omitKeys(data, runtimeNodeDataKeySet);
 
 const cleanNodeForSave = (node = {}) => {
-  const { width, height, selected, dragging, positionAbsolute, ...rest } = node;
+  const rest = omitKeys(node, transientNodeKeys);
+  const style =
+    node.type === "text"
+      ? {
+          ...(node.style || {}),
+          width: node.width || node.style?.width || 200,
+          height: node.height || node.style?.height || 200,
+        }
+      : node.style;
   return {
     ...rest,
+    ...(style ? { style } : {}),
     data: cleanNodeDataForSave(node.data),
   };
 };
@@ -562,8 +589,8 @@ const editableNodeData = (node) => {
 };
 
 const cleanEdgeForSave = (edge = {}) => {
-  const { type, markerEnd, sourceHandle, targetHandle, ...rest } = edge;
-  const { columns, ...savedData } = rest.data || {};
+  const rest = omitKeys(edge, transientEdgeKeys);
+  const savedData = omitKeys(rest.data, new Set(["columns"]));
   return {
     ...rest,
     data: savedData,
@@ -604,6 +631,16 @@ const hydrateRunParamValues = (inputVariables, currentValues = {}) =>
     }),
   );
 
+const replayRunParamValues = (inputVariables, replayParams = {}) => {
+  const normalizedValues = Object.fromEntries(
+    Object.entries(replayParams || {}).map(([name, value]) => [
+      normalizeVariableName(name),
+      value,
+    ]),
+  );
+  return hydrateRunParamValues(inputVariables, normalizedValues);
+};
+
 const replayInputValueHistory = (inputVariables, replays) => {
   const names = (inputVariables || []).map((item) =>
     normalizeVariableName(item.name).replace(/^\$+/, ""),
@@ -626,62 +663,11 @@ const replayInputValueHistory = (inputVariables, replays) => {
 };
 
 const hasConcertNodeChange = (changes) =>
-  changes.some((change) => !["select", "dimensions"].includes(change.type));
+  changes.some(
+    (change) => !["select", "dimensions", "position"].includes(change.type),
+  );
 const hasConcertEdgeChange = (changes) =>
   changes.some((change) => change.type !== "select");
-
-function ContextMenu({ menu, menuRef, onViewData, onViewLp, onOpenConcert, canViewLp }) {
-  if (!menu) return null;
-
-  return (
-    <div ref={menuRef} className="context-menu" style={{ left: menu.x, top: menu.y }}>
-      <button onClick={() => onViewData(menu.node)}>View Data</button>
-      {menu.node.type === "opl" && canViewLp && (
-        <button onClick={() => onViewLp(menu.node)}>View LP</button>
-      )}
-      {menu.node.type === "concert" && menu.node.data?.concertName && (
-        <button onClick={() => onOpenConcert(menu.node)}>Open Concert</button>
-      )}
-    </div>
-  );
-}
-
-function NodePalette({ disabledTypes = new Set() }) {
-  return (
-    <aside className="node-palette" aria-label="Node palette">
-      {paletteGroups.map((group) => (
-        <div className="palette-group" key={group.map((item) => item.type).join("-")}>
-          {group.map((item) => {
-            const Icon = nodeIcon[item.type] || nodeIcon.python;
-            const isDisabled = disabledTypes.has(item.type);
-            return (
-              <button
-                key={item.type}
-                className={`palette-item ${isDisabled ? "disabled" : ""}`}
-                disabled={isDisabled}
-                draggable={!isDisabled}
-                onDragStart={(event) => {
-                  if (isDisabled) {
-                    event.preventDefault();
-                    return;
-                  }
-                  event.dataTransfer.setData("application/metronome-node", item.type);
-                  event.dataTransfer.effectAllowed = "copy";
-                }}
-                title={item.label}
-              >
-                <span className="palette-node" style={nodeStyle[item.type]}>
-                  <Icon fontSize="small" />
-                </span>
-                <span className="palette-label">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
-    </aside>
-  );
-}
 
 function LoopInEditor({ editData, setEditData, inputColumns = [] }) {
   const [newGroupByColumn, setNewGroupByColumn] = useState("");
@@ -750,21 +736,37 @@ function LoopInEditor({ editData, setEditData, inputColumns = [] }) {
         </aside>
 
         <div className="loop-in-settings">
-          <label className="field-label">Iteration Mode</label>
-          <select
-            className="text-input"
-            value={editData.iterationMode || "allRows"}
-            onChange={(event) =>
-              setEditData((current) => ({
-                ...current,
-                iterationMode: event.target.value,
-              }))
-            }
-          >
-            <option value="allRows">All rows</option>
-            <option value="eachRow">Each row</option>
-            <option value="groupBy">Group by columns</option>
-          </select>
+          <div className="loop-iteration-label-row">
+            <span className="field-label">Iteration Mode</span>
+            {["eachRow", "groupBy"].includes(editData.iterationMode) && (
+              <span className="loop-parallel-warning">
+                Iterations run in parallel; execution order is not sequential.
+              </span>
+            )}
+          </div>
+          <div className="loop-iteration-radios" role="radiogroup" aria-label="Iteration Mode">
+            {[
+              ["allRows", "All rows"],
+              ["eachRow", "Each row"],
+              ["groupBy", "Group by columns"],
+            ].map(([value, label]) => (
+              <label key={value}>
+                <input
+                  type="radio"
+                  name="loop-iteration-mode"
+                  value={value}
+                  checked={(editData.iterationMode || "allRows") === value}
+                  onChange={(event) =>
+                    setEditData((current) => ({
+                      ...current,
+                      iterationMode: event.target.value,
+                    }))
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
 
           {(editData.iterationMode || "allRows") === "groupBy" && (
             <div className="loop-group-section">
@@ -1077,21 +1079,18 @@ function EditorPanel({
   inputVariables,
   onSave,
   onClose,
+  onRequestClose,
 }) {
   const [isPyomoCodeOpen, setIsPyomoCodeOpen] = useState(false);
   const [pyomoCopyToast, setPyomoCopyToast] = useState("");
   const pyomoCopyToastTimerRef = useRef(null);
-
-  useEffect(() => {
-    setIsPyomoCodeOpen(false);
-    setPyomoCopyToast("");
-  }, [selectedNode?.id]);
 
   if (!selectedNode || !editData) return null;
 
   return (
     <div
       className="editor-modal-backdrop"
+      onClick={onRequestClose}
       onKeyDown={(event) => {
         if (event.key === "Escape" && isPyomoCodeOpen) {
           event.preventDefault();
@@ -1100,12 +1099,15 @@ function EditorPanel({
         event.stopPropagation();
       }}
     >
-      <aside className="editor-panel">
+      <aside className="editor-panel" onClick={(event) => event.stopPropagation()}>
         <div className="editor-header">
           <div>
             <div className="eyebrow">{nodeTypeLabel(selectedNode.type)}</div>
             <h2>Edit Node</h2>
           </div>
+          <button type="button" className="icon-button" onClick={onRequestClose} title="Close">
+            ×
+          </button>
         </div>
 
         <label className="field-label">Name</label>
@@ -1188,7 +1190,7 @@ function EditorPanel({
           )}
           {selectedNode.type === "concertInput" && <InputEditor />}
           {selectedNode.type === "concertOutput" && <OutputEditor />}
-          {["cacheRead", "cacheWrite", "fileRead", "fileWrite"].includes(selectedNode.type) && (
+          {["cacheRead", "cacheWrite"].includes(selectedNode.type) && (
             <ResourceEditor
               data={editData}
               onChange={setEditData}
@@ -1220,6 +1222,9 @@ function EditorPanel({
               }
             />
           )}
+          {selectedNode.type === "text" && (
+            <TextEditor editData={editData} setEditData={setEditData} />
+          )}
         </div>
 
         <div className="editor-actions">
@@ -1229,8 +1234,13 @@ function EditorPanel({
             </button>
           )}
           <div className="action-spacer" />
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary-button" onClick={onSave}>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onSave}
+            disabled={selectedNode.type === "concert" && editData.concertInputsLoading}
+          >
             Save
           </button>
         </div>
@@ -1251,7 +1261,7 @@ function EditorPanel({
                 type="button"
                 onClick={async () => {
                   await navigator.clipboard.writeText(buildPyomoCode(editData));
-                  setPyomoCopyToast("복사 완료");
+                  setPyomoCopyToast("Copied");
                   window.clearTimeout(pyomoCopyToastTimerRef.current);
                   pyomoCopyToastTimerRef.current = window.setTimeout(() => setPyomoCopyToast(""), 1600);
                 }}
@@ -1338,32 +1348,35 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     defaultServerName = "Local",
     defaultApiBaseUrl = "http://localhost:8000",
     servers = [],
-    onServerChange = () => {},
   },
   ref,
 ) {
-  const initialTabRef = useRef(createBlankTab());
+  const { showError } = useErrorDialog();
   const [nodes, setNodes] = useNodesState(initialNodes);
   const [edges, setEdges] = useEdgesState(initialEdges);
   const [isTabOpen, setIsTabOpen] = useState(false);
   const [tabs, setTabs] = useState([]);
-  const tabsRef = useRef(tabs);
+  const tabsRef = useRef([]);
   const openingServerConcertsRef = useRef(new Map());
-  tabsRef.current = tabs;
   const [activeTabId, setActiveTabId] = useState(null);
-  const [concertId, setConcertId] = useState(initialTabRef.current.concertId);
-  const [lastCommitId, setLastCommitId] = useState(initialTabRef.current.lastCommitId);
-  const [commitId, setCommitId] = useState(initialTabRef.current.commitId);
+  const [concertId, setConcertId] = useState(() => crypto.randomUUID());
+  const [lastCommitId, setLastCommitId] = useState(null);
+  const [commitId, setCommitId] = useState(null);
   const [concertName, setConcertName] = useState("untitled_concert");
   const [concertFileLabel, setConcertFileLabel] = useState("untitled_concert");
   const [concertFileHandle, setConcertFileHandle] = useState(null);
   const [version, setVersion] = useState("");
-  const serverName = defaultServerName;
   const apiBaseUrl = defaultApiBaseUrl;
+  const [replayServerName, setReplayServerName] = useState(defaultServerName);
+  const replayServer =
+    servers.find((server) => server.name === replayServerName) ||
+    servers.find((server) => server.name === defaultServerName);
+  const replayApiBaseUrl = replayServer
+    ? `http://${replayServer.host}:${replayServer.port}`
+    : defaultApiBaseUrl;
   const [editData, setEditData] = useState(null);
   const [run, setRun] = useState(null);
   const [activeRunId, setActiveRunId] = useState(null);
-  const [isRunErrorDismissed, setIsRunErrorDismissed] = useState(false);
   const [openingConcertName, setOpeningConcertName] = useState("");
   const [lastRunId, setLastRunId] = useState(null);
   const [runCompleteTiming, setRunCompleteTiming] = useState(null);
@@ -1391,6 +1404,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const [pendingCloseTabId, setPendingCloseTabId] = useState(null);
   const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
   const [isReplayDialogOpen, setIsReplayDialogOpen] = useState(false);
+  const [runCacheSelection, setRunCacheSelection] = useState(null);
   const openInputRef = useRef(null);
   const subMenuRef = useRef(null);
   const contextMenuRef = useRef(null);
@@ -1403,10 +1417,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const graphClipboardRef = useRef(null);
   const pointerPositionRef = useRef(null);
   const bottomPanelDragRef = useRef(null);
+  const nodeResizeHistoryRef = useRef(null);
 
   useEffect(() => {
-    if (run?.status === "error") setIsRunErrorDismissed(false);
-  }, [run?.error, run?.status]);
+    if (run?.status === "error" && !activeRunId) {
+      showError(run.error || "Concert run failed.");
+    }
+  }, [activeRunId, run?.error, run?.status, showError]);
 
   useEffect(() => {
     const closeSubMenuOutside = (event) => {
@@ -1437,7 +1454,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const nodeMoveHistoryRef = useRef(null);
   const viewNodeDataRef = useRef(null);
 
-  graphRef.current = { nodes, edges };
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
+    graphRef.current = { nodes, edges };
+  }, [edges, nodes]);
   const selectedNodes = useMemo(
     () => nodes.filter((node) => node.selected),
     [nodes],
@@ -1627,13 +1650,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setReplays([]);
   }, []);
 
-  const clearHistory = useCallback(() => {
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    setUndoStack([]);
-    setRedoStack([]);
-  }, []);
-
   const openNewTab = useCallback(() => {
     saveActiveTabSnapshot();
     const nextTab = createBlankTab();
@@ -1812,6 +1828,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         globalVariables: variablePayload(globalVariables),
         inputVariables: variablePayload(inputVariables, "defaultValue"),
         nodes: nodes.map((node) => {
+          if (!supportedNodeTypes.has(node.type)) throw new Error(`Unsupported Concert node type: ${node.type}`);
           validateNodeName(node.data?.name);
           return cleanNodeForSave(node);
         }),
@@ -1824,20 +1841,17 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const createTabFromConcertPayload = useCallback(
     (
       payload,
-      { expectedName = "", fileHandle = null, fileLabel = "" } = {},
+      { fileHandle = null, fileLabel = "", validatePayload = true } = {},
     ) => {
-      if (typeof payload.version !== "string") {
-        throw new Error("Concert version must be a string.");
-      }
-      if (!Object.hasOwn(payload, "lastCommitId") || !Object.hasOwn(payload, "commitId")) {
+      if (
+        validatePayload &&
+        (!Object.hasOwn(payload, "lastCommitId") || !Object.hasOwn(payload, "commitId"))
+      ) {
         throw new Error("Concert requires lastCommitId and commitId fields.");
       }
-      const nextName = concertBaseName(payload.name);
-      if (expectedName && concertBaseName(expectedName) !== nextName) {
-        throw new Error(
-          `Concert name mismatch: file is ${concertBaseName(expectedName)}, but payload name is ${nextName}.`,
-        );
-      }
+      const nextName = validatePayload
+        ? concertBaseName(payload.name)
+        : String(payload.name || "").replace(/\\/g, "/").split("/").at(-1);
       return {
         ...createBlankTab(),
         concertId: payload.concertId,
@@ -1846,11 +1860,22 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         concertName: nextName,
         concertFileLabel: fileLabel || nextName,
         concertFileHandle: fileHandle,
-        version: payload.version,
+        version: typeof payload.version === "string" ? payload.version : "",
         nodes: payload.nodes.map((node) => {
-          validateNodeName(node.data?.name);
+          if (validatePayload && !supportedNodeTypes.has(node.type)) {
+            throw new Error(`Unsupported Concert node type: ${node.type}`);
+          }
           return {
             ...node,
+            zIndex: node.type === "text" ? 0 : regularNodeZIndex,
+            ...(node.type === "text"
+              ? {
+                  style: {
+                    width: node.style?.width || 200,
+                    height: node.style?.height || 200,
+                  },
+                }
+              : {}),
             data: { ...node.data, status: "idle" },
           };
         }),
@@ -1868,7 +1893,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     (payload, options = {}) => {
       const nextTab = createTabFromConcertPayload(payload, options);
       const nextLabel = nextTab.concertFileLabel;
-      const nextName = safeConcertPathName(nextTab.concertName);
+      const nextName = options.validatePayload === false
+        ? nextTab.concertName
+        : safeConcertPathName(nextTab.concertName);
       const existingTab = tabsRef.current.find((tab) => {
         if (options.fileHandle && tab.concertFileHandle === options.fileHandle)
           return true;
@@ -1898,7 +1925,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     ],
   );
 
-  const writeConcertFile = async (handle, nameOverride = null, versionOverride = null, commitOverrides = null) => {
+  const writeConcertFile = useCallback(async (handle, nameOverride = null, versionOverride = null, commitOverrides = null) => {
     const writable = await handle.createWritable();
     const payload = {
       ...concertPayload(nameOverride, versionOverride),
@@ -1910,39 +1937,35 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     if (commitOverrides && Object.hasOwn(commitOverrides, "lastCommitId")) setLastCommitId(commitOverrides.lastCommitId);
     if (commitOverrides && Object.hasOwn(commitOverrides, "commitId")) setCommitId(commitOverrides.commitId);
     setIsDirty(false);
-  };
+  }, [concertPayload]);
 
-  const postConcertPayload = async (payload) => {
-    const response = await fetch(`${apiBaseUrl}/playings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      throw new Error(`Save Concert to backend failed: ${await response.text()}`);
-    }
-  };
-
-  const inferConcertColumns = async (
+  const inferConcertColumns = useCallback(async (
     targetNodes,
     targetEdges,
     targetGlobalVariables = globalVariables,
     targetInputVariables = inputVariables,
     startNodeId = null,
   ) => {
+    const graph = executableGraph(targetNodes, targetEdges);
+    if (!graph.nodes.length) {
+      return { nodes: targetNodes, edges: targetEdges };
+    }
     const response = await fetch(`${apiBaseUrl}/schema/infer`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        nodes: targetNodes.map((node) => ({
+        nodes: graph.nodes.map((node) => ({
           ...node,
           data: cleanNodeDataForSave(node.data || {}),
         })),
-        edges: targetEdges,
+        edges: graph.edges,
         globalVariables: targetGlobalVariables || [],
         inputVariables: targetInputVariables || [],
         params: runParamValues,
-        startNodeId,
+        startNodeId:
+          startNodeId && graph.nodes.some((node) => node.id === startNodeId)
+            ? startNodeId
+            : null,
       }),
     });
     if (!response.ok) {
@@ -1966,9 +1989,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         },
       })),
     };
-  };
+  }, [apiBaseUrl, globalVariables, inputVariables, runParamValues]);
 
-  const inferConcertPayloadColumns = async (payload) => {
+  const inferConcertPayloadColumns = useCallback(async (payload) => {
     try {
       const inferred = await inferConcertColumns(
         payload.nodes || [],
@@ -1980,7 +2003,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     } catch {
       return payload;
     }
-  };
+  }, [inferConcertColumns]);
 
   const validateCalledConcerts = async (targetNodes) => {
     const concertIds = [
@@ -2002,11 +2025,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
   };
 
-  const saveConcertBackend = async (name) => {
-    await postConcertPayload(concertPayload(name || concertName));
-  };
-
-  const saveConcertAsLocal = async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
+  const saveConcertAsLocal = useCallback(async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
     if (!isTabOpen) return validateConcertName(concertName);
     const fileName = `${validateConcertName(concertName)}.concert`;
     if ("showSaveFilePicker" in window) {
@@ -2047,9 +2066,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     if (commitOverrides && Object.hasOwn(commitOverrides, "commitId")) setCommitId(commitOverrides.commitId);
     setIsDirty(false);
     return nextName;
-  };
+  }, [clearReplayState, concertName, concertPayload, isTabOpen, writeConcertFile]);
 
-  const saveConcertLocal = async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
+  const saveConcertLocal = useCallback(async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
     if (!isTabOpen) return validateConcertName(concertName);
     if (concertFileHandle && "createWritable" in concertFileHandle) {
       const nextName = getFileNameBase(concertFileHandle.name || concertName);
@@ -2059,9 +2078,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return payloadName;
     }
     return saveConcertAsLocal(versionOverride, deploymentName, commitOverrides);
-  };
+  }, [concertFileHandle, concertName, isTabOpen, saveConcertAsLocal, writeConcertFile]);
 
-  const openConcertLocal = async () => {
+  const openConcertLocal = useCallback(async () => {
     if ("showOpenFilePicker" in window) {
       const [handle] = await window.showOpenFilePicker({
         multiple: false,
@@ -2079,7 +2098,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
 
     openInputRef.current?.click();
-  };
+  }, [inferConcertPayloadColumns, openConcertPayloadInTab]);
 
   const openServerConcert = useCallback(async (name, concertIdOverride = "") => {
     const key = concertIdOverride || name;
@@ -2088,12 +2107,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const operation = (async () => {
       setOpeningConcertName(concertBaseName(name));
       const path = name.split("/").map(encodeURIComponent).join("/");
-      const response = await fetch(concertIdOverride
-        ? `${apiBaseUrl}/playings-by-id/${encodeURIComponent(concertIdOverride)}`
-        : `${apiBaseUrl}/playings/${path}`);
+      const response = await fetch(`${apiBaseUrl}/playings/${path}`);
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
       const payload = await inferConcertPayloadColumns(await response.json());
-      openConcertPayloadInTab(payload, { expectedName: name, fileLabel: name.split("/").pop() });
+      openConcertPayloadInTab(payload, {
+        fileLabel: name.split("/").pop(),
+        matchName: false,
+        validatePayload: false,
+      });
     })();
     openingServerConcertsRef.current.set(key, operation);
     try {
@@ -2116,7 +2137,11 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
       const payload = await inferConcertPayloadColumns(await response.json());
       const fileLabel = item.path.split("/").pop().replace(/\.concert$/, "");
-      openConcertPayloadInTab(payload, { expectedName: item.name, fileLabel, matchName: false });
+      openConcertPayloadInTab(payload, {
+        fileLabel,
+        matchName: false,
+        validatePayload: false,
+      });
     })();
     openingServerConcertsRef.current.set(key, operation);
     try {
@@ -2139,7 +2164,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         fileLabel: getFileNameBase(file.name),
       });
     } catch (error) {
-      window.alert(`Open Concert failed: ${error.message}`);
+      showError(`Open Concert failed: ${error.message}`);
     }
   };
 
@@ -2159,43 +2184,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       error: "Drag-and-drop file opening is disabled. Use File > Open.",
     });
   };
-
-  const resetConcert = useCallback(
-    (name = "untitled_concert") => {
-      setIsTabOpen(true);
-      setConcertId(crypto.randomUUID());
-      setLastCommitId(null);
-      setCommitId(null);
-      setConcertName(concertBaseName(name));
-      setConcertFileLabel(concertBaseName(name));
-      setConcertFileHandle(null);
-      setVersion("");
-      setNodes([]);
-      setEdges([]);
-      setGlobalVariables([]);
-      setInputVariables([]);
-      setRunParamValues({});
-      setEditData(null);
-      setSearchHighlight(null);
-      setContextMenu(null);
-      setRun(null);
-      setActiveRunId(null);
-      setLastRunId(null);
-      setPendingRun(null);
-      setIsSaveChangesDialogOpen(false);
-      setIsVariablesDialogOpen(false);
-      setIsReplayDialogOpen(false);
-      setIsSearchVisible(true);
-      setSearchHeight(220);
-      setIsOutputVisible(false);
-      setOutputHeight(220);
-      setActiveBottomPanel("search");
-      clearReplayState();
-      clearHistory();
-      setIsDirty(false);
-    },
-    [clearHistory, clearReplayState, setEdges, setNodes],
-  );
 
   const requestCloseTab = useCallback(
     (tabId) => {
@@ -2263,20 +2251,47 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     const requestId = replayRequestRef.current + 1;
     replayRequestRef.current = requestId;
     const response = await fetch(
-      `${apiBaseUrl}/replays?concertName=${encodeURIComponent(name)}`,
+      `${replayApiBaseUrl}/replays?concertName=${encodeURIComponent(name)}`,
     );
     if (!response.ok) return;
     const body = await response.json();
     if (requestId !== replayRequestRef.current) return;
-    const nextReplays = (body.replays || []).filter(
-      (replay) => replay.concertName === name,
-    );
+    const nextReplays = (body.replays || [])
+      .filter((replay) => replay.concertName === name)
+      .map((replay) => ({
+        ...replay,
+        replayServerName,
+        replayApiBaseUrl,
+      }));
     setReplays(nextReplays);
     setSelectedReplayId((current) => {
       if (nextReplays.some((replay) => replay.id === current)) return current;
       return "";
     });
-  }, [apiBaseUrl, currentReplayConcertName]);
+  }, [currentReplayConcertName, replayApiBaseUrl, replayServerName]);
+
+  const changeReplayServer = useCallback(async (nextServerName) => {
+    if (nextServerName === replayServerName) return true;
+    const nextServer = servers.find((server) => server.name === nextServerName);
+    if (!nextServer) {
+      showError(`Server not found: ${nextServerName}.`);
+      return false;
+    }
+    const nextApiBaseUrl = `http://${nextServer.host}:${nextServer.port}`;
+    try {
+      const response = await fetch(`${nextApiBaseUrl}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      const body = response.ok ? await response.json() : null;
+      if (!response.ok || body?.status !== "ok") throw new Error();
+      setReplayServerName(nextServerName);
+      setSelectedReplayId("");
+      return true;
+    } catch {
+      showError(`No response from server: ${nextServerName}.`);
+      return false;
+    }
+  }, [replayServerName, servers, showError]);
 
   useEffect(() => {
     loadReplays();
@@ -2404,7 +2419,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (!source || !target) return [];
       return normalizeEdge({
         ...edge,
-        id: `edge_${source}_${target}`,
         source,
         target,
         selected: false,
@@ -2433,54 +2447,47 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   useEffect(() => {
     if (!activeRunId) return undefined;
-
-    const poll = async () => {
+    const controller = new AbortController();
+    let pollTimer = null;
+    const loadCompletedRun = async () => {
       try {
-        const response = await fetch(`${apiBaseUrl}/runs/${activeRunId}`);
+        const endpoint = `${apiBaseUrl}/runs/${activeRunId}?concertName=${encodeURIComponent(currentReplayConcertName)}`;
+        const response = await fetch(endpoint, { signal: controller.signal });
         if (!response.ok) throw new Error(await responseErrorMessage(response));
-        const responseRun = await response.json();
-        const failedNodeError = Object.values(responseRun.nodes || {}).find(
+        const nextRun = await response.json();
+        if (["queued", "running"].includes(nextRun.status)) {
+          setRun(nextRun);
+          applyRunStateToNodes(nextRun);
+          pollTimer = window.setTimeout(loadCompletedRun, 500);
+          return;
+        }
+        const failedNodeError = Object.values(nextRun.nodes || {}).find(
           (nodeRun) => nodeRun?.status === "error" && nodeRun?.error,
         )?.error;
-        const backendError = responseRun.error || failedNodeError;
-        const nextRun = responseRun.status === "error"
-          ? { ...responseRun, error: backendError || "The backend reported that the run failed." }
-          : responseRun;
-        setRun((currentRun) => ({
-          ...nextRun,
-          nodes: Object.fromEntries(
-            Object.entries(nextRun.nodes || {}).map(([nodeId, nodeRun]) => [
-              nodeId,
-              {
-                ...nodeRun,
-                result: nodeRun.result || currentRun?.nodes?.[nodeId]?.result,
-              },
-            ]),
-          ),
-        }));
+        const completedRun = nextRun.status === "error"
+          ? { ...nextRun, error: nextRun.error || failedNodeError || "The backend reported that the run failed." }
+          : nextRun;
+        setRun(completedRun);
         applyRunStateToNodes(nextRun);
-        if (!["success", "error", "canceled"].includes(nextRun.status)) return;
         setActiveRunId(null);
-        if (nextRun.status === "error") setIsRunErrorDismissed(false);
-        if (nextRun.status === "success") {
-          setRunCompleteTiming(nextRun.timing || {});
-        }
+        if (nextRun.status === "success") setRunCompleteTiming(nextRun.timing || {});
         loadReplays();
       } catch (error) {
+        if (error.name === "AbortError") return;
         const message = `Run status check failed: ${error.message}`;
         setRun((currentRun) => ({ ...currentRun, status: "error", error: message }));
         setNodes((currentNodes) => currentNodes.map((node) => node.data.status === "pending" || node.data.status === "running"
           ? { ...node, data: { ...node.data, status: "error" } }
           : node));
-        setIsRunErrorDismissed(false);
         setActiveRunId(null);
       }
     };
-
-    poll();
-    const interval = window.setInterval(poll, 800);
-    return () => window.clearInterval(interval);
-  }, [activeRunId, apiBaseUrl, applyRunStateToNodes, loadReplays]);
+    loadCompletedRun();
+    return () => {
+      controller.abort();
+      if (pollTimer) window.clearTimeout(pollTimer);
+    };
+  }, [activeRunId, apiBaseUrl, applyRunStateToNodes, currentReplayConcertName, loadReplays, setNodes]);
 
   useEffect(() => {
     const trackCanvasFocus = (event) => {
@@ -2539,7 +2546,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (isSaveShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        void saveConcertLocal().catch((error) => window.alert(`Save Concert failed: ${error.message}`));
+        void saveConcertLocal().catch((error) => showError(`Save Concert failed: ${error.message}`));
         return;
       }
 
@@ -2547,7 +2554,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         event.preventDefault();
         event.stopPropagation();
         void openConcertLocal().catch((error) => {
-          if (error?.name !== "AbortError") window.alert(`Open Concert failed: ${error.message}`);
+          if (error?.name !== "AbortError") showError(`Open Concert failed: ${error.message}`);
         });
         return;
       }
@@ -2611,6 +2618,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         !event.altKey &&
         !event.shiftKey &&
         selectedNode &&
+        selectedNode.type !== "text" &&
         !editData &&
         !isTextEditingTarget(event.target)
       ) {
@@ -2668,6 +2676,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     redo,
     saveConcertLocal,
     selectedNode,
+    showError,
     setEdges,
     setNodes,
     undo,
@@ -2692,16 +2701,49 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     };
   }, []);
 
+  const snapTextNodeSize = useCallback(
+    (nodeId, size) => {
+      const snapPosition = (value) =>
+        Math.round(Number(value || 0) / 100) * 100;
+      const snapSize = (value) =>
+        Math.max(100, Math.round(Number(value || 0) / 100) * 100);
+      const nextNodes = graphRef.current.nodes.map((node) =>
+        node.id === nodeId && node.type === "text"
+          ? {
+              ...node,
+              position: { x: snapPosition(size.x), y: snapPosition(size.y) },
+              width: snapSize(size.width),
+              height: snapSize(size.height),
+              style: {
+                ...(node.style || {}),
+                width: snapSize(size.width),
+                height: snapSize(size.height),
+              },
+            }
+          : node,
+      );
+      graphRef.current = { ...graphRef.current, nodes: nextNodes };
+      setNodes(nextNodes);
+      setIsDirty(true);
+    },
+    [setNodes],
+  );
+
   const flowNodes = useMemo(
     () =>
       nodes.map((node) => ({
         ...node,
+        zIndex: node.type === "text" ? 0 : regularNodeZIndex,
         data: {
           ...node.data,
           isConnectMode,
         },
       })),
     [isConnectMode, nodes],
+  );
+  const flowEdges = useMemo(
+    () => edges.map((edge) => ({ ...edge, zIndex: edgeZIndex })),
+    [edges],
   );
   const disabledPaletteTypes = useMemo(() => {
     const disabled = new Set();
@@ -2715,36 +2757,37 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [nodes]);
 
   const dataframeColumnsForNode = useCallback(
-    (nodeId, edgeList = edges, visited = new Set()) => {
-      if (!nodeId || visited.has(nodeId)) return [];
-      visited.add(nodeId);
-      const node = nodes.find((item) => item.id === nodeId);
-      const result = run?.nodes?.[nodeId]?.result;
+    (nodeId, edgeList = edges) => {
+      const visited = new Set();
+      const stack = [{ nodeId, edgeColumns: [] }];
+      while (stack.length) {
+        const current = stack.pop();
+        if (current.edgeColumns.length) return current.edgeColumns;
+        if (!current.nodeId || visited.has(current.nodeId)) continue;
+        visited.add(current.nodeId);
+        const node = nodes.find((item) => item.id === current.nodeId);
+        const result = run?.nodes?.[current.nodeId]?.result;
       if (result?.kind === "dataframe") {
         const resultColumns = (result.columns || []).map((column) => ({
           name: column,
           type: result.dtypes?.[column] || "unknown",
         }));
-        if (resultColumns.length) return resultColumns;
+          if (resultColumns.length) return resultColumns;
       }
 
-      const nodeColumns = normalizeColumnMetadata(node?.data?.outputColumns || []);
-      if (nodeColumns.length) return nodeColumns;
-      if (["cacheRead", "fileRead"].includes(node?.type)) return [];
+        const nodeColumns = normalizeColumnMetadata(node?.data?.outputColumns || []);
+        if (nodeColumns.length) return nodeColumns;
+        if (node?.type === "cacheRead") continue;
 
-      const incomingEdges = edgeList.filter((edge) => edge.target === nodeId);
-      for (const edge of incomingEdges) {
-        const edgeColumns = normalizeColumnMetadata(edge.data?.columns || []);
-        if (edgeColumns.length) return edgeColumns;
-
-        const parentColumns = dataframeColumnsForNode(
-          edge.source,
-          edgeList,
-          visited,
-        );
-        if (parentColumns.length) return parentColumns;
+        const incomingEdges = edgeList.filter((edge) => edge.target === current.nodeId);
+        for (let index = incomingEdges.length - 1; index >= 0; index -= 1) {
+          const edge = incomingEdges[index];
+          stack.push({
+            nodeId: edge.source,
+            edgeColumns: normalizeColumnMetadata(edge.data?.columns || []),
+          });
+        }
       }
-
       return [];
     },
     [edges, nodes, run],
@@ -2834,6 +2877,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const sourceNode = nodes.find((node) => node.id === params.source);
       const targetNode = nodes.find((node) => node.id === params.target);
       if (
+        sourceNode?.type === "text" ||
+        targetNode?.type === "text" ||
         noChildSourceTypes.has(sourceNode?.type) ||
         noParentTargetTypes.has(targetNode?.type)
       ) {
@@ -2880,6 +2925,26 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (hasActualPositionChange && !nodeMoveHistoryRef.current) {
         nodeMoveHistoryRef.current = stateForHistory(graphRef.current, globalVariables, inputVariables);
       }
+      const textDimensionChanges = changes.filter((change) => {
+        if (change.type !== "dimensions" || !change.dimensions) return false;
+        const currentNode = graphRef.current.nodes.find(
+          (node) => node.id === change.id && node.type === "text",
+        );
+        if (!currentNode) return false;
+        const currentWidth = currentNode.width || currentNode.style?.width || 200;
+        const currentHeight = currentNode.height || currentNode.style?.height || 200;
+        return (
+          currentWidth !== change.dimensions.width ||
+          currentHeight !== change.dimensions.height
+        );
+      });
+      if (textDimensionChanges.length && !nodeResizeHistoryRef.current) {
+        nodeResizeHistoryRef.current = stateForHistory(
+          graphRef.current,
+          globalVariables,
+          inputVariables,
+        );
+      }
       const removedNodeIds = changes
         .filter((change) => change.type === "remove")
         .map((change) => change.id);
@@ -2899,8 +2964,27 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           suppressNextEdgeHistoryRef.current = false;
         }, 0);
       }
-      if (hasConcertNodeChange(changes)) setIsDirty(true);
-      const nextNodes = applyNodeChanges(changes, graphRef.current.nodes);
+      if (
+        hasConcertNodeChange(changes) ||
+        hasActualPositionChange ||
+        textDimensionChanges.length
+      ) {
+        setIsDirty(true);
+      }
+      const nextNodes = applyNodeChanges(changes, graphRef.current.nodes).map(
+        (node) =>
+          node.type === "text"
+            ? {
+                ...node,
+                zIndex: 0,
+                style: {
+                  ...(node.style || {}),
+                  width: node.width || node.style?.width || 200,
+                  height: node.height || node.style?.height || 200,
+                },
+              }
+            : { ...node, zIndex: regularNodeZIndex },
+      );
       graphRef.current = { ...graphRef.current, nodes: nextNodes };
       setNodes(nextNodes);
       if (
@@ -2909,6 +2993,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       ) {
         pushHistory("Move nodes", nodeMoveHistoryRef.current);
         nodeMoveHistoryRef.current = null;
+      }
+      if (
+        nodeResizeHistoryRef.current &&
+        changes.some(
+          (change) =>
+            change.type === "dimensions" && change.resizing === false,
+        )
+      ) {
+        pushHistory("Resize text node", nodeResizeHistoryRef.current);
+        nodeResizeHistoryRef.current = null;
       }
     },
     [globalVariables, inputVariables, nodeNameById, pushHistory, setNodes],
@@ -3057,6 +3151,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setIsSaveChangesDialogOpen(false);
   }, [clearNodeSelection]);
 
+  const requestEditorClose = useCallback(() => {
+    if (selectedNode && hasEditorChanges(selectedNode, editData)) {
+      setIsSaveChangesDialogOpen(true);
+      return;
+    }
+    closeEditor();
+  }, [closeEditor, editData, selectedNode]);
+
   const openEditor = (_, node) => {
     setContextMenu(null);
     setIsSaveChangesDialogOpen(false);
@@ -3126,7 +3228,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setIsSaveChangesDialogOpen(false);
     setSearchHighlight(null);
 
-    if (["dbRead", "python", "opl", "dbWrite", "concert", "concertInput", "cacheRead", "cacheWrite", "fileRead", "fileWrite", "loopIn", "loopOut"].includes(target.type)) {
+    if (["dbRead", "python", "opl", "dbWrite", "concert", "concertInput", "cacheRead", "cacheWrite", "loopIn", "loopOut"].includes(target.type)) {
       setEditData(editableNodeData(target));
     } else {
       setEditData(null);
@@ -3194,27 +3296,41 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     try {
       nodeName = validateNodeName(editData.name);
     } catch (error) {
-      window.alert(error.message);
+      showError(error.message);
       return;
     }
     const hasChanges = hasEditorChanges(selectedNode, editData);
     let nextEditData = editData;
     if (selectedNode.type === "concert") {
-      nextEditData = {
-        ...editData,
-        concertLoadError: undefined,
-        inputParams: Object.fromEntries(
-          Object.entries(editData.inputParamValues || {}).map(
-            ([key, value]) => {
-              const definition = (editData.calledConcertInputVariables || []).find(
-                (item) => normalizeVariableName(item.name).replace(/^\$+/, "") === key.replace(/^\$+/, ""),
-              );
-              if (!definition) throw new Error(`Input variable definition not found: $${key.replace(/^\$+/, "")}`);
-              return [key, coerceVariableValue(value, definition.type, `$${key.replace(/^\$+/, "")}`)];
-            },
+      try {
+        if (editData.concertInputsLoading) {
+          throw new Error("Wait for the selected Concert input definitions to finish loading.");
+        }
+        if (!editData.concertId || !editData.concertName) {
+          throw new Error("Select a Concert before saving the Concert Call node.");
+        }
+        if (editData.concertLoadError) {
+          throw new Error(editData.concertLoadError);
+        }
+        nextEditData = {
+          ...editData,
+          concertLoadError: undefined,
+          inputParams: Object.fromEntries(
+            Object.entries(editData.inputParamValues || {}).map(
+              ([key, value]) => {
+                const definition = (editData.calledConcertInputVariables || []).find(
+                  (item) => normalizeVariableName(item.name).replace(/^\$+/, "") === key.replace(/^\$+/, ""),
+                );
+                if (!definition) throw new Error(`Input variable definition not found: $${key.replace(/^\$+/, "")}`);
+                return [key, coerceVariableValue(value, definition.type, `$${key.replace(/^\$+/, "")}`)];
+              },
+            ),
           ),
-        ),
-      };
+        };
+      } catch (error) {
+        showError(`Save Concert Call failed: ${error.message}`);
+        return;
+      }
       if (nextEditData.concertId === concertId) {
         setRun({
           status: "error",
@@ -3228,16 +3344,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         node.id === selectedNode.id
           ? {
               ...node,
-              selected: false,
               data: {
                 ...node.data,
                 ...nextEditData,
                 name: nodeName,
               },
             }
-          : node.selected
-            ? { ...node, selected: false }
-            : node,
+          : node,
       );
     const nextEdges = edges;
     const changed = hasChanges;
@@ -3247,8 +3360,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
     graphRef.current = { nodes: nextNodes, edges: nextEdges };
     setNodes(nextNodes);
-    closeEditor();
-    if (changed) {
+    setEditData(null);
+    setSearchHighlight(null);
+    setIsSaveChangesDialogOpen(false);
+    if (changed && selectedNode.type !== "text") {
       try {
         const inferred = await inferConcertColumns(
           nextNodes,
@@ -3272,6 +3387,39 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setContextMenu({ node, x: event.clientX, y: event.clientY });
   };
 
+  const moveTextNodeLayer = useCallback(
+    (nodeId, toFront) => {
+      const currentNodes = graphRef.current.nodes;
+      const textNodes = currentNodes
+        .filter((node) => node.type === "text");
+      const targetIndex = textNodes.findIndex((node) => node.id === nodeId);
+      if (targetIndex < 0) return;
+      if (
+        (toFront && targetIndex === textNodes.length - 1) ||
+        (!toFront && targetIndex === 0)
+      ) {
+        setContextMenu(null);
+        return;
+      }
+      const [target] = textNodes.splice(targetIndex, 1);
+      if (toFront) textNodes.push(target);
+      else textNodes.unshift(target);
+      pushHistory(
+        `${toFront ? "Bring to Front" : "Send to Back"}: ${target.data?.name || nodeId}`,
+      );
+      const regularNodes = currentNodes.filter((node) => node.type !== "text");
+      const nextNodes = [
+        ...textNodes.map((node) => ({ ...node, zIndex: 0 })),
+        ...regularNodes.map((node) => ({ ...node, zIndex: regularNodeZIndex })),
+      ];
+      graphRef.current = { ...graphRef.current, nodes: nextNodes };
+      setNodes(nextNodes);
+      setIsDirty(true);
+      setContextMenu(null);
+    },
+    [pushHistory, setNodes],
+  );
+
   const viewNodeData = useCallback(
     async (node) => {
       const existingNodeRun = run?.nodes?.[node.id];
@@ -3280,7 +3428,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         openDataWindow(node, existingNodeRun);
         return;
       }
-      const queryUrl = `${apiBaseUrl}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node.id)}/data/query`;
+      const queryUrl = `${apiBaseUrl}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node.id)}/data/query?concertName=${encodeURIComponent(currentReplayConcertName)}`;
       try {
         const response = await fetch(queryUrl, {
           method: "POST",
@@ -3302,12 +3450,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         });
       }
     },
-    [apiBaseUrl, lastRunId, run],
+    [apiBaseUrl, currentReplayConcertName, lastRunId, run],
   );
-  viewNodeDataRef.current = viewNodeData;
+  useEffect(() => {
+    viewNodeDataRef.current = viewNodeData;
+  }, [viewNodeData]);
 
   const viewOplLp = useCallback(
-    async (node) => {
+    async (node, replayIdOverride = null) => {
       const viewer = window.open("", "_blank", "width=1100,height=760,resizable=yes,scrollbars=yes");
       if (!viewer) return;
       viewer.document.title = `${node.data.name} - LP Model`;
@@ -3336,9 +3486,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         format: "lp",
       });
       if (hasCurrentCache) query.set("cacheId", lastRunId);
-      if (selectedReplayId) query.set("replayId", selectedReplayId);
+      const resolvedReplayId = replayIdOverride || selectedReplayId;
+      if (resolvedReplayId) query.set("replayId", resolvedReplayId);
       try {
-        const response = await fetch(`${apiBaseUrl}/opl/model?${query.toString()}`);
+        const replayPoint = visibleReplays.find(
+          (item) => item.id === resolvedReplayId,
+        );
+        const modelApiBaseUrl = hasCurrentCache
+          ? apiBaseUrl
+          : replayPoint?.replayApiBaseUrl || apiBaseUrl;
+        const response = await fetch(`${modelApiBaseUrl}/opl/model?${query.toString()}`);
         if (!response.ok) throw new Error(await response.text());
         pre.textContent = await response.text();
       } catch (error) {
@@ -3346,15 +3503,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         pre.style.color = "#fecaca";
       }
     },
-    [apiBaseUrl, currentReplayConcertName, lastRunId, run, selectedReplayId],
+    [apiBaseUrl, currentReplayConcertName, lastRunId, run, selectedReplayId, visibleReplays],
   );
 
   const openReplayCache = useCallback(
     async (replay) => {
       if (!replay?.cache?.available) return;
       try {
+        const sourceApiBaseUrl = replay.replayApiBaseUrl || replayApiBaseUrl;
         const response = await fetch(
-          `${apiBaseUrl}/replays/cache?concertName=${encodeURIComponent(replay.concertName)}&replayId=${encodeURIComponent(replay.id)}`,
+          `${sourceApiBaseUrl}/replays/cache?concertName=${encodeURIComponent(replay.concertName)}&replayId=${encodeURIComponent(replay.id)}`,
         );
         if (!response.ok) {
           setRun({
@@ -3365,13 +3523,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           return;
         }
         const body = await response.json();
-        const nextRun = body.run;
-        setSelectedReplayId(replay.id);
-        setRun(nextRun);
-        setLastRunId(nextRun.id);
-        setActiveRunId(null);
-        applyRunStateToNodes(nextRun);
-        setIsReplayDialogOpen(false);
+        if (!body.caches?.length) throw new Error("No Run Cache found.");
+        setRunCacheSelection({ replay, caches: body.caches });
       } catch (error) {
         setRun({
           status: "error",
@@ -3380,15 +3533,72 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         });
       }
     },
-    [apiBaseUrl, applyRunStateToNodes],
+    [replayApiBaseUrl],
+  );
+
+  const openSelectedRunCache = useCallback(
+    async (cacheId) => {
+      const replay = runCacheSelection?.replay;
+      if (!replay || !cacheId) return;
+      try {
+        const sourceApiBaseUrl = replay.replayApiBaseUrl || replayApiBaseUrl;
+        const response = await fetch(
+          `${sourceApiBaseUrl}/replays/cache/${encodeURIComponent(cacheId)}?concertName=${encodeURIComponent(replay.concertName)}&replayId=${encodeURIComponent(replay.id)}`,
+        );
+        if (!response.ok) throw new Error(await response.text());
+        const body = await response.json();
+        const nextRun = body.run;
+        setRun(nextRun);
+        setLastRunId(nextRun.id);
+        setActiveRunId(null);
+        applyRunStateToNodes(nextRun);
+        setRunCacheSelection(null);
+        setIsReplayDialogOpen(false);
+      } catch (error) {
+        setRun({ status: "error", nodes: {}, error: `Open cache failed: ${error.message}` });
+      }
+    },
+    [applyRunStateToNodes, replayApiBaseUrl, runCacheSelection],
+  );
+
+  const deleteSelectedRunCache = useCallback(
+    async (cacheId) => {
+      const replay = runCacheSelection?.replay;
+      if (!replay || !cacheId) return;
+      if (!window.confirm(`Delete Run Cache ${cacheId}?`)) return;
+      try {
+        const sourceApiBaseUrl = replay.replayApiBaseUrl || replayApiBaseUrl;
+        const response = await fetch(
+          `${sourceApiBaseUrl}/replays/cache/${encodeURIComponent(cacheId)}?concertName=${encodeURIComponent(replay.concertName)}&replayId=${encodeURIComponent(replay.id)}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) throw new Error(await response.text());
+        setRunCacheSelection((current) => {
+          if (!current) return null;
+          const nextCaches = current.caches.filter(
+            (cache) => cache.cacheId !== cacheId,
+          );
+          return nextCaches.length ? { ...current, caches: nextCaches } : null;
+        });
+        if (lastRunId === cacheId) {
+          setLastRunId(null);
+          setRun(null);
+        }
+        await loadReplays();
+      } catch (error) {
+        setRun({ status: "error", nodes: {}, error: `Delete cache failed: ${error.message}` });
+      }
+    },
+    [lastRunId, loadReplays, replayApiBaseUrl, runCacheSelection],
   );
 
   const clearReplayCache = useCallback(
     async (replay) => {
       if (!replay?.cache?.available) return;
       try {
+        const sourceApiBaseUrl = replay.replayApiBaseUrl || replayApiBaseUrl;
         const response = await fetch(
-          `${apiBaseUrl}/replays/cache?concertName=${encodeURIComponent(replay.concertName)}&replayId=${encodeURIComponent(replay.id)}`,
+          `${sourceApiBaseUrl}/replays/cache?concertName=${encodeURIComponent(replay.concertName)}&replayId=${encodeURIComponent(replay.id)}`,
           { method: "DELETE" },
         );
         if (!response.ok) {
@@ -3399,7 +3609,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           });
           return;
         }
-        if (lastRunId === replay.cache.cacheId) {
+        if (run?.cache?.enabled && run?.cache?.sourceReplayId === replay.id) {
           setLastRunId(null);
           setRun(null);
         }
@@ -3412,7 +3622,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         });
       }
     },
-    [apiBaseUrl, lastRunId, loadReplays],
+    [loadReplays, replayApiBaseUrl, run],
   );
 
   const closeReplayPoint = useCallback(() => {
@@ -3428,8 +3638,11 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setIsReplayDialogOpen(false);
     setNodes((currentNodes) =>
       currentNodes.map((node) => {
-        const { runRows, runDurationMs, runLoopIterations, ...data } =
-          node.data || {};
+        const data = omitKeys(node.data, new Set([
+          "runRows",
+          "runDurationMs",
+          "runLoopIterations",
+        ]));
         return {
           ...node,
           selected: false,
@@ -3448,6 +3661,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     runParams = null,
     skipPrompt = false,
   ) => {
+    if (mode === "selected" && selectedNode?.type === "text") {
+      setRun({
+        status: "error",
+        nodes: {},
+        error: "Text nodes cannot be executed.",
+      });
+      return;
+    }
     if (replay && !selectedReplayId) {
       setRun({
         status: "error",
@@ -3457,11 +3678,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return;
     }
 
-    if (!replay && inputVariables.length && !skipPrompt) {
+    if (!skipPrompt) {
       setPendingRun({ mode, replay });
-      setRunParamValues((current) =>
-        hydrateRunParamValues(inputVariables, current),
-      );
+      if (!replay) {
+        setRunParamValues((current) =>
+          hydrateRunParamValues(inputVariables, current),
+        );
+      }
       return;
     }
 
@@ -3480,22 +3703,25 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return;
     }
 
-    const nextNodes = nodes.map((node) => ({
-      ...node,
-      data: {
-        ...node.data,
-        status: "pending",
-        runRows: null,
-        runDurationMs: null,
-        runLoopIterations: null,
-      },
-    }));
+    const nextNodes = nodes.map((node) =>
+      node.type === "text"
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              status: "pending",
+              runRows: null,
+              runDurationMs: null,
+              runLoopIterations: null,
+            },
+          },
+    );
     const nextEdges = edges.map(normalizeEdge);
     setNodes(nextNodes);
     setEdges(nextEdges);
     setRun(null);
     setActiveRunId(null);
-    setIsRunErrorDismissed(false);
     setRunCompleteTiming(null);
 
     const replayPoint = visibleReplays.find(
@@ -3505,21 +3731,64 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       runParams || (replay ? replayPoint?.params || {} : runParamValues);
 
     try {
+      let executionReplayId = selectedReplayId;
+      if (
+        replay &&
+        replayPoint?.replayApiBaseUrl &&
+        replayPoint.replayApiBaseUrl !== apiBaseUrl
+      ) {
+        const transferQuery = new URLSearchParams({
+          concertName: replayPoint.concertName,
+          replayId: replayPoint.id,
+          sourceServerName: replayPoint.replayServerName,
+        });
+        const statusResponse = await fetch(
+          `${apiBaseUrl}/replays/import-status?${transferQuery.toString()}`,
+        );
+        if (!statusResponse.ok) {
+          throw new Error(`Replay import check failed: ${await responseErrorMessage(statusResponse)}`);
+        }
+        const importStatus = await statusResponse.json();
+        executionReplayId = importStatus.replayId;
+        if (!importStatus.exists) {
+          const exportResponse = await fetch(
+            `${replayPoint.replayApiBaseUrl}/replays/export?${transferQuery.toString()}`,
+          );
+          if (!exportResponse.ok) {
+            throw new Error(`Replay download failed: ${await responseErrorMessage(exportResponse)}`);
+          }
+          const replayArchive = await exportResponse.blob();
+          const importResponse = await fetch(
+            `${apiBaseUrl}/replays/import?${transferQuery.toString()}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/zip" },
+              body: replayArchive,
+            },
+          );
+          if (!importResponse.ok) {
+            throw new Error(`Replay import failed: ${await responseErrorMessage(importResponse)}`);
+          }
+          const importResult = await importResponse.json();
+          executionReplayId = importResult.replayId;
+        }
+      }
+      const graph = executableGraph(nextNodes, nextEdges);
       const response = await fetch(`${apiBaseUrl}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           concertName: runConcertName,
           concertId,
-          nodes: nextNodes,
-          edges: nextEdges,
+          nodes: graph.nodes,
+          edges: graph.edges,
           globalVariables: variablePayload(globalVariables),
           inputVariables: variablePayload(inputVariables, "defaultValue"),
           params: typedParamPayload(inputParams, inputVariables),
           mode,
           selected: selectedNode?.id,
           replay,
-          replayId: replay ? selectedReplayId : null,
+          replayId: replay ? executionReplayId : null,
         }),
       });
       if (!response.ok) throw new Error(await responseErrorMessage(response));
@@ -3537,7 +3806,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         data: { ...node.data, status: "error" },
       })));
       setRun({ status: "error", nodes: failedNodes, error: message });
-      setIsRunErrorDismissed(false);
     }
   };
 
@@ -3547,13 +3815,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const response = await fetch(`${apiBaseUrl}/runs/${activeRunId}/cancel`, {
         method: "POST",
       });
-      if (response.ok) {
-        const nextRun = await response.json();
-        setRun(nextRun);
-        applyRunStateToNodes(nextRun);
-        setActiveRunId(null);
-        setRunCompleteTiming(null);
-      }
+      if (!response.ok) throw new Error(await responseErrorMessage(response));
+      setRun((currentRun) => ({ ...currentRun, status: "canceled" }));
+      setRunCompleteTiming(null);
     } catch (error) {
       setRun({
         status: "error",
@@ -3565,10 +3829,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const confirmPendingRun = (draftValues = runParamValues) => {
     if (!pendingRun) return;
-    const nextValues = hydrateRunParamValues(inputVariables, draftValues);
-    setRunParamValues(nextValues);
-    const params = typedParamPayload(nextValues, inputVariables);
     const nextRun = pendingRun;
+    let params = null;
+    if (!nextRun.replay) {
+      const nextValues = hydrateRunParamValues(inputVariables, draftValues);
+      setRunParamValues(nextValues);
+      params = typedParamPayload(nextValues, inputVariables);
+    }
     setPendingRun(null);
     void runConcert(nextRun.mode, nextRun.replay, params, true);
   };
@@ -3580,17 +3847,17 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       closeConcert,
       openConcert: () => {
         void openConcertLocal().catch((error) => {
-          if (error?.name !== "AbortError") window.alert(`Open Concert failed: ${error.message}`);
+          if (error?.name !== "AbortError") showError(`Open Concert failed: ${error.message}`);
         });
       },
       openServerConcert,
       openDeploymentConcert,
       saveConcert: () => {
-        void saveConcertLocal().catch((error) => window.alert(`Save Concert failed: ${error.message}`));
+        void saveConcertLocal().catch((error) => showError(`Save Concert failed: ${error.message}`));
       },
       saveConcertAs: () => {
         void saveConcertAsLocal().catch((error) => {
-          if (error?.name !== "AbortError") window.alert(`Save Concert failed: ${error.message}`);
+          if (error?.name !== "AbortError") showError(`Save Concert failed: ${error.message}`);
         });
       },
       prepareDeployment: async (nextVersion, deploymentName, nextCommitId) => {
@@ -3609,7 +3876,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       activeConcertName: () => isTabOpen ? concertName : "",
       hasActiveConcert: () => isTabOpen,
     }),
-    [closeConcert, concertName, concertPayload, isTabOpen, lastCommitId, openConcertLocal, openDeploymentConcert, openNewTab, openServerConcert, saveConcertAsLocal, saveConcertLocal],
+    [closeConcert, concertName, concertPayload, isTabOpen, lastCommitId, openConcertLocal, openDeploymentConcert, openNewTab, openServerConcert, saveConcertAsLocal, saveConcertLocal, showError],
   );
 
   return (
@@ -3759,7 +4026,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                   Run All
                 </button>
                 <button
-                  disabled={!selectedNode}
+                  disabled={!selectedNode || selectedNode.type === "text"}
                   onClick={() => runConcert("selected", false)}
                 >
                   Run To Selected
@@ -3781,7 +4048,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                 </button>
                 <button
                   onClick={() => runConcert("selected", true)}
-                  disabled={!selectedNode || !selectedReplayId}
+                  disabled={!selectedNode || selectedNode.type === "text" || !selectedReplayId}
                 >
                   Replay Run To Selected
                 </button>
@@ -3815,13 +4082,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                   onDragOver={onCanvasDragOver}
                   onDrop={onCanvasDrop}
                 >
-                  <ReactFlow
+                  <TextNodeResizeContext.Provider value={snapTextNodeSize}>
+                    <ReactFlow
                     onInit={(instance) => {
                       reactFlowRef.current = instance;
                       instance.setViewport?.(viewportRef.current);
                     }}
                     nodes={flowNodes}
-                    edges={edges}
+                    edges={flowEdges}
                     onNodesChange={handleNodesChange}
                     onEdgesChange={handleEdgesChange}
                     onConnect={onConnect}
@@ -3840,6 +4108,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                     defaultEdgeOptions={{
                       type: "center",
                       markerEnd: { type: MarkerType.ArrowClosed },
+                      zIndex: edgeZIndex,
                     }}
                     snapToGrid
                     snapGrid={[100, 100]}
@@ -3850,13 +4119,16 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                     panOnDrag={false}
                     selectionOnDrag
                     selectionKeyCode={null}
+                    deleteKeyCode={["Backspace", "Delete"]}
                     selectionMode={SelectionMode.Full}
+                    elevateNodesOnSelect={false}
                     onlyRenderVisibleElements
                     minZoom={0.1}
                   >
                     <Background variant="lines" gap={100} size={1} />
                     <Controls />
-                  </ReactFlow>
+                    </ReactFlow>
+                  </TextNodeResizeContext.Provider>
                 </div>
 
                 {(isSearchVisible || isOutputVisible) && (
@@ -3934,16 +4206,18 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         )}
       </section>
 
-      <ContextMenu
+      <ConcertNodeContextMenu
         menu={contextMenu}
         menuRef={contextMenuRef}
         onViewData={(node) => {
           void viewNodeData(node);
           setContextMenu(null);
         }}
+        onBringToFront={(node) => moveTextNodeLayer(node.id, true)}
+        onSendToBack={(node) => moveTextNodeLayer(node.id, false)}
         onOpenConcert={(node) => {
           setContextMenu(null);
-          void openServerConcert(node.data.concertName, node.data.concertId).catch((error) => window.alert(error.message));
+          void openServerConcert(node.data.concertName, node.data.concertId).catch(showError);
         }}
         canViewLp={Boolean(
           contextMenu?.node?.type === "opl" &&
@@ -3957,6 +4231,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       />
 
       <EditorPanel
+        key={selectedNode?.id || "closed"}
         selectedNode={selectedNode}
         editData={editData}
         setEditData={setEditData}
@@ -3972,6 +4247,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         inputVariables={inputVariables}
         onSave={saveEditor}
         onClose={closeEditor}
+        onRequestClose={requestEditorClose}
       />
 
       {isSaveChangesDialogOpen && (
@@ -4014,18 +4290,26 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
       {pendingRun && (
         <RunParamsDialog
-          inputVariables={inputVariables}
-          values={runParamValues}
+          inputVariables={
+            pendingRun.replay ? selectedReplay?.inputVariables || [] : inputVariables
+          }
+          values={
+            pendingRun.replay
+              ? replayRunParamValues(
+                  selectedReplay?.inputVariables || [],
+                  selectedReplay?.params || {},
+                )
+              : runParamValues
+          }
           history={replayInputValueHistory(inputVariables, visibleReplays)}
+          showInputParameters
+          inputParametersDisabled={pendingRun.replay}
           onRun={confirmPendingRun}
           onCancel={() => setPendingRun(null)}
         />
       )}
 
       {activeRunId && <RunningDialog run={run} onCancel={cancelRun} />}
-      {run?.status === "error" && !activeRunId && !isRunErrorDismissed && (
-        <RunningDialog run={run} onClose={() => setIsRunErrorDismissed(true)} />
-      )}
       {openingConcertName && <RunningDialog title="Opening" message={`${openingConcertName} is opening.`} />}
 
       {runCompleteTiming && (
@@ -4040,13 +4324,22 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           replays={visibleReplays}
           selectedReplayId={selectedReplayId}
           servers={servers}
-          serverName={serverName}
-          onServerChange={onServerChange}
+          serverName={replayServerName}
+          onServerChange={changeReplayServer}
           onSelect={setSelectedReplayId}
           onClose={() => setIsReplayDialogOpen(false)}
           onOpen={() => setIsReplayDialogOpen(false)}
           onCacheOpen={openReplayCache}
           onClearCache={clearReplayCache}
+        />
+      )}
+      {runCacheSelection && (
+        <RunCacheDialog
+          replay={runCacheSelection.replay}
+          caches={runCacheSelection.caches}
+          onClose={() => setRunCacheSelection(null)}
+          onOpen={openSelectedRunCache}
+          onDelete={deleteSelectedRunCache}
         />
       )}
     </div>

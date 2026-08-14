@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import ConcertListPanel from "./ConcertListPanel";
 import { variableInputType, variableInputValue } from "./variableTypes";
 import { concertBaseName, validateConcertPath } from "./nameValidation";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 const safeName = (value) => {
   const safe = (value || "task").replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
@@ -127,6 +128,7 @@ export default function ConcertCallEditor({
   outputColumns = [],
   outputMessage = "Run this node to inspect Concert output columns.",
 }) {
+  const { showError } = useErrorDialog();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const loadConcertInputsByName = async (concertName, concertId = "") => {
@@ -134,17 +136,35 @@ export default function ConcertCallEditor({
     try {
       nextConcertName = safeConcertPathName(concertName);
     } catch (error) {
+      showError(error);
       setEditData((current) => ({
         ...current,
         concertLoadError: error.message,
+        concertInputsLoading: false,
       }));
       return;
     }
 
-    const response = await fetch(concertId
-      ? `${apiBaseUrl}/playings-by-id/${encodeURIComponent(concertId)}`
-      : `${apiBaseUrl}/playings/${encodeConcertPath(nextConcertName)}`);
+    let response;
+    try {
+      response = await fetch(concertId
+        ? `${apiBaseUrl}/playings-by-id/${encodeURIComponent(concertId)}`
+        : `${apiBaseUrl}/playings/${encodeConcertPath(nextConcertName)}`);
+    } catch (error) {
+      showError(`Load Concert failed: ${error.message}`);
+      setEditData((current) => ({
+        ...current,
+        concertLoadError: `Load Concert failed: ${error.message}`,
+        concertInputsLoading: false,
+      }));
+      return;
+    }
     if (!response.ok) {
+      showError(
+        response.status === 404
+          ? `Concert not found in backend: ${nextConcertName}`
+          : `Load Concert failed: ${response.status}`,
+      );
       setEditData((current) => ({
         ...current,
         concertLoadError:
@@ -154,6 +174,7 @@ export default function ConcertCallEditor({
         calledConcertInputVariables: [],
         inputParamValues: {},
         inputParams: {},
+        concertInputsLoading: false,
       }));
       return;
     }
@@ -166,6 +187,7 @@ export default function ConcertCallEditor({
       concertName: concertBaseName(payload.name),
       concertLoadError: undefined,
       calledConcertInputVariables: nextInputVariables,
+      concertInputsLoading: false,
       inputParamValues: inputVariablesToParamValues(
         nextInputVariables,
         current.inputParamValues || current.inputParams || {},
@@ -182,6 +204,7 @@ export default function ConcertCallEditor({
       calledConcertInputVariables: [],
       inputParamValues: {},
       inputParams: {},
+      concertInputsLoading: true,
     }));
     setIsPickerOpen(false);
     await loadConcertInputsByName(concertName, concert.concertId);
@@ -205,8 +228,8 @@ export default function ConcertCallEditor({
           </button>
         </div>
         <label className="field-label">Input Parameters</label>
-        {editData.concertLoadError && (
-          <div className="error-text inline-error">{editData.concertLoadError}</div>
+        {editData.concertInputsLoading && (
+          <p className="muted">Loading Concert input definitions...</p>
         )}
         {(editData.calledConcertInputVariables || []).length === 0 ? (
           <p className="muted">Load a backend Concert to inspect its input fields.</p>
@@ -220,7 +243,6 @@ export default function ConcertCallEditor({
                   <input
                     className="text-input"
                     type={variableInputType(item.type)}
-                    step={item.type === "datetime" ? "1" : undefined}
                     value={variableInputValue(editData.inputParamValues?.[key], item.type)}
                     placeholder={String(item.defaultValue ?? "")}
                     onChange={(event) =>

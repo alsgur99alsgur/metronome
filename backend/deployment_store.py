@@ -213,6 +213,7 @@ class DeploymentStore:
             raise ValueError("Invalid deployment transaction ID.")
         payload = self.validate_payload(payload)
         name = self.validate_name(deployment_name or payload["name"])
+        self.validate_directory(os.path.dirname(name))
         self._validate_target_directory(name)
         source_name = self.validate_name(source_name or name)
         if os.path.basename(source_name) != os.path.basename(name):
@@ -536,7 +537,7 @@ class DeploymentStore:
         if any(
             not part
             or part in {".", ".."}
-            or not re.fullmatch(r"[A-Za-z0-9_.-]+", part)
+            or not re.fullmatch(r"[A-Za-z0-9_]+", part)
             for part in value.split("/")
         ):
             raise ValueError(f"Invalid Concert directory: {directory}")

@@ -82,6 +82,8 @@
 
 - 현재 Concert schema와 현재 코드만 지원한다. 구형 DAG/Concert/replay 필드 alias나 fallback을 추가하지 않는다.
 - 잘못되거나 누락된 필드는 조용히 보정하지 말고 사용자 또는 API 호출자에게 명시적으로 실패시킨다.
+- 정의되지 않은 Input/Global 변수를 노드 코드, SQL, 조건식, Loop, Concert Call 매핑 또는 실행 요청에서 사용하면 반드시 변수명과 사용 위치를 포함한 명확한 오류로 즉시 실패시킨다. 미정의 값을 무시하거나 기본값으로 보정하거나 Replay/UI의 별도 행으로 추가하는 fallback은 절대 구현하지 않는다.
+- Input/Global 변수 정의 이름은 Concert 내부에서 유일해야 한다. 중복 정의를 덮어쓰지 말고 명시적으로 실패시킨다. `$`는 사용자 문법/표시에 사용하고 내부 실행 키는 `$` 없는 단일 형식만 허용한다.
 - Concert 파일 이름과 노드 이름은 영문자, 숫자, underscore만 허용한다: `^[A-Za-z0-9_]+$`.
 - React Flow 예약 타입 `input`/`output` 대신 `concertInput`/`concertOutput`을 사용한다.
 - 저장 시 runtime 필드(`status`, `runRows`, `runDurationMs`, `runLoopIterations`, `outputColumns`, `schemaError`)와 edge 표시 필드(`type`, `markerEnd`, handles)를 제거한다.

@@ -2,12 +2,12 @@ import { Handle, Position } from "reactflow";
 import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import DataObjectOutlinedIcon from "@mui/icons-material/DataObjectOutlined";
 import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
-import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import LoginOutlinedIcon from "@mui/icons-material/LoginOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import MemoryOutlinedIcon from "@mui/icons-material/MemoryOutlined";
 import RepeatOutlinedIcon from "@mui/icons-material/RepeatOutlined";
 import StorageOutlinedIcon from "@mui/icons-material/StorageOutlined";
+import NotesOutlinedIcon from "@mui/icons-material/NotesOutlined";
 import SvgIcon from "@mui/material/SvgIcon";
 
 function PythonIcon(props) {
@@ -65,9 +65,8 @@ export const nodeStyle = {
     background: "#ecfeff",
   },
   cacheRead: { borderColor: "#2563eb", background: "#eff6ff" },
-  fileRead: { borderColor: "#2563eb", background: "#eff6ff" },
   cacheWrite: { borderColor: "#f97316", background: "#fff7ed" },
-  fileWrite: { borderColor: "#f97316", background: "#fff7ed" },
+  text: { borderColor: "#64748b", background: "#fffde7" },
 };
 
 export const statusLabel = {
@@ -89,10 +88,9 @@ export const nodeIcon = {
   concertOutput: LogoutOutlinedIcon,
   cacheRead: MemoryOutlinedIcon,
   cacheWrite: MemoryOutlinedIcon,
-  fileRead: FolderOutlinedIcon,
-  fileWrite: FolderOutlinedIcon,
   loopIn: RepeatOutlinedIcon,
   loopOut: RepeatOutlinedIcon,
+  text: NotesOutlinedIcon,
 };
 
 export default function Node({ data, type, selected }) {

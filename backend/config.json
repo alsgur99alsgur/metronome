@@ -11,5 +11,9 @@
   "executor": {
     "workers": 10,
     "timeoutSeconds": 60
+  },
+  "storage": {
+    "retentionDays": 7,
+    "cacheMemoryLimitMb": 64
   }
 }

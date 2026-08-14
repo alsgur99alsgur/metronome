@@ -2,11 +2,12 @@
 
 import os
 import re
-import shutil
 
 import pandas as pd
 import pyomo.environ as pyo
 from pyomo.opt import ProblemFormat
+
+from atomic_file import atomic_copy, atomic_generate
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_]\w*$")
@@ -166,39 +167,74 @@ def _require_column(dataframe, column, label):
         raise KeyError(f"{label} column not found: {column}")
 
 
-def _write_model_artifacts(model, artifact_dirs, node_id):
+def _safe_artifact_name(value, fallback):
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value or fallback)).strip("_") or fallback
+
+
+def _write_model_artifacts(model, artifact_dirs, node_id, artifact_key=None):
     if not artifact_dirs:
         return
     added_feasibility_objective = False
     if next(model.component_data_objects(pyo.Objective, active=True), None) is None:
         setattr(model, "_opl_feasibility_objective", pyo.Objective(expr=0))
         added_feasibility_objective = True
-    safe_node_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(node_id or "opl")).strip("_") or "opl"
+    safe_node_id = _safe_artifact_name(node_id, "opl")
+    safe_artifact_key = (
+        _safe_artifact_name(artifact_key, "iteration")
+        if artifact_key is not None
+        else None
+    )
     first_dir = artifact_dirs[0]
     os.makedirs(first_dir, exist_ok=True)
-    first_lp = os.path.join(first_dir, f"{safe_node_id}.lp")
-    first_mps = os.path.join(first_dir, f"{safe_node_id}.mps")
+    first_node_dir = os.path.join(first_dir, safe_node_id)
+    if safe_artifact_key:
+        os.makedirs(first_node_dir, exist_ok=True)
+        first_lp = os.path.join(first_node_dir, f"{safe_artifact_key}.lp")
+        first_mps = os.path.join(first_node_dir, f"{safe_artifact_key}.mps")
+    else:
+        first_lp = os.path.join(first_dir, f"{safe_node_id}.lp")
+        first_mps = os.path.join(first_dir, f"{safe_node_id}.mps")
     try:
-        model.write(
+        atomic_generate(
             first_lp,
-            format=ProblemFormat.cpxlp,
-            io_options={"symbolic_solver_labels": True},
+            lambda path: model.write(
+                path,
+                format=ProblemFormat.cpxlp,
+                io_options={"symbolic_solver_labels": True},
+            ),
         )
-        model.write(
+        atomic_generate(
             first_mps,
-            format=ProblemFormat.mps,
-            io_options={"symbolic_solver_labels": True},
+            lambda path: model.write(
+                path,
+                format=ProblemFormat.mps,
+                io_options={"symbolic_solver_labels": True},
+            ),
         )
+        if safe_artifact_key:
+            atomic_copy(first_lp, os.path.join(first_dir, f"{safe_node_id}.lp"))
+            atomic_copy(first_mps, os.path.join(first_dir, f"{safe_node_id}.mps"))
         for artifact_dir in artifact_dirs[1:]:
             os.makedirs(artifact_dir, exist_ok=True)
-            shutil.copyfile(first_lp, os.path.join(artifact_dir, f"{safe_node_id}.lp"))
-            shutil.copyfile(first_mps, os.path.join(artifact_dir, f"{safe_node_id}.mps"))
+            if safe_artifact_key:
+                node_dir = os.path.join(artifact_dir, safe_node_id)
+                os.makedirs(node_dir, exist_ok=True)
+                atomic_copy(first_lp, os.path.join(node_dir, f"{safe_artifact_key}.lp"))
+                atomic_copy(first_mps, os.path.join(node_dir, f"{safe_artifact_key}.mps"))
+            atomic_copy(first_lp, os.path.join(artifact_dir, f"{safe_node_id}.lp"))
+            atomic_copy(first_mps, os.path.join(artifact_dir, f"{safe_node_id}.mps"))
     finally:
         if added_feasibility_objective:
             model.del_component("_opl_feasibility_objective")
 
 
-def build_and_solve_opl(data, input_dataframes, artifact_dirs=None, node_id=None):
+def build_and_solve_opl(
+    data,
+    input_dataframes,
+    artifact_dirs=None,
+    node_id=None,
+    artifact_key=None,
+):
     model = pyo.ConcreteModel()
     sets = data.get("sets") or []
     params = data.get("params") or []
@@ -402,7 +438,12 @@ def build_and_solve_opl(data, input_dataframes, artifact_dirs=None, node_id=None
     mip_gap_options = {"highs": "mip_rel_gap", "gurobi": "MIPGap", "cplex": "mipgap"}
     solver.options[timeout_options[solver_name]] = timeout_seconds
     solver.options[mip_gap_options[solver_name]] = mip_gap
-    _write_model_artifacts(model, artifact_dirs or [], node_id)
+    _write_model_artifacts(
+        model,
+        artifact_dirs or [],
+        node_id,
+        artifact_key=artifact_key,
+    )
     results = solver.solve(model)
     status = str(results.solver.status)
     termination = str(results.solver.termination_condition)

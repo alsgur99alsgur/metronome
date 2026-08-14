@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { useErrorDialog } from "../errors/ErrorDialog";
 
 function ColumnList({ columns = [], emptyText }) {
   return (
@@ -21,16 +22,6 @@ function ColumnList({ columns = [], emptyText }) {
 function InputColumnsPanel({ inputDataframes = [] }) {
   const [activeInputId, setActiveInputId] = useState(null);
   const activeInput = inputDataframes.find((input) => input.id === activeInputId) || inputDataframes[0] || null;
-
-  useEffect(() => {
-    if (!inputDataframes.length) {
-      setActiveInputId(null);
-      return;
-    }
-    if (!inputDataframes.some((input) => input.id === activeInputId)) {
-      setActiveInputId(inputDataframes[0].id);
-    }
-  }, [activeInputId, inputDataframes]);
 
   return (
     <aside className="column-side-panel">
@@ -61,11 +52,11 @@ function InputColumnsPanel({ inputDataframes = [] }) {
   );
 }
 
-function OutputColumnsPanel({ columns = [], error, emptyText }) {
+function OutputColumnsPanel({ columns = [], emptyText }) {
   return (
     <aside className="column-side-panel">
       <div className="column-title">Output Columns</div>
-      {error ? <div className="column-empty">{error}</div> : <ColumnList columns={columns} emptyText={emptyText} />}
+      <ColumnList columns={columns} emptyText={emptyText} />
     </aside>
   );
 }
@@ -82,12 +73,17 @@ export default function DbEditor({
   globalVariables = [],
   inputVariables = [],
 }) {
+  const { showError } = useErrorDialog();
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const decorationIdsRef = useRef([]);
   const [editorReady, setEditorReady] = useState(0);
   const [connections, setConnections] = useState([]);
   const [columnError, setColumnError] = useState(null);
+
+  useEffect(() => {
+    if (columnError) showError(columnError);
+  }, [columnError, showError]);
 
   useEffect(() => {
     let isMounted = true;
@@ -111,10 +107,7 @@ export default function DbEditor({
   }, [apiBaseUrl]);
 
   useEffect(() => {
-    if (!describeEnabled) {
-      setColumnError(null);
-      return undefined;
-    }
+    if (!describeEnabled) return undefined;
 
     let isMounted = true;
     const timeout = window.setTimeout(async () => {
@@ -252,7 +245,7 @@ export default function DbEditor({
             }}
           />
         </div>
-        <OutputColumnsPanel columns={outputColumns} error={columnError} emptyText={outputMessage} />
+        <OutputColumnsPanel columns={outputColumns} emptyText={outputMessage} />
       </div>
     </div>
   );

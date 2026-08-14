@@ -143,13 +143,12 @@ def infer_concert_columns(nodes, edges, params=None, start_node_id=None):
             elif node_type in {
                 "dbWrite",
                 "cacheWrite",
-                "fileWrite",
                 "loopIn",
                 "loopOut",
                 "concertOutput",
             }:
                 known[node_id] = parent_columns[0] if parent_columns else []
-            elif node_type in {"concertInput", "cacheRead", "fileRead"}:
+            elif node_type in {"concertInput", "cacheRead"}:
                 known[node_id] = known.get(node_id, [])
             else:
                 known[node_id] = parent_columns[0] if parent_columns else known.get(node_id, [])

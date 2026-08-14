@@ -30,16 +30,19 @@ export function openDataWindow(node, nodeResult, viewerWindow = null, options = 
 
   const url = new URL(window.location.href);
   url.searchParams.set("dataViewer", token);
+  const windowName = `data-viewer-${node.id}`;
   const viewer = viewerWindow || window.open(
     url.href,
-    `data-viewer-${node.id}`,
+    windowName,
     "popup=yes,width=1240,height=820,menubar=no,toolbar=no,location=no",
   );
   if (!viewer) {
     viewerPayloads.delete(token);
-    alert("Popup was blocked. Allow popups for this app to open the data viewer.");
+    reportError("Popup was blocked. Allow popups for this app to open the data viewer.");
     return;
   }
   if (viewerWindow) viewer.location.replace(url.href);
   viewer.focus();
+  window.metronomeElectron?.focusChildWindow(windowName);
 }
+import { reportError } from "../errors/ErrorDialog.jsx";
