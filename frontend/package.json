@@ -49,8 +49,11 @@
     ],
     "extraFiles": [
       {
-        "from": "../backend/dist/metronome_backend.exe",
-        "to": "metronome_backend.exe"
+        "from": "../backend/dist/metronome_backend",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "extraResources": [

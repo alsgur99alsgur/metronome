@@ -39,6 +39,8 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 현재 창에�
 압축을 해제한 디렉터리에는 다음 실행 파일과 런처가 포함된다.
 
 - `metronome_backend.exe`: 독립적인 FastAPI 백엔드 실행 파일이다.
+- `_internal`: `metronome_backend.exe`가 사용하는 Python 및 네이티브 의존성이다.
+  백엔드 실행 파일과 항상 같은 디렉터리에 두어야 한다.
 - `electron.exe`: 프런트와 Admin 프런트가 공유하는 Electron 런타임이다.
 - `metronome.cmd`: `electron.exe`로 메인 프런트만 연다.
 - `metronome_admin.cmd`: `electron.exe --admin`으로 Admin 프런트만 연다.
@@ -55,7 +57,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 현재 창에�
 }
 ```
 
-`true`이면 `metronome_backend.exe`가 Windows 콘솔을 할당해 로그를 표시하고, `false`이면 콘솔 없이 실행한다. 기본값은 `false`이며 변경 사항은 백엔드를 다음에 시작할 때 적용된다.
+`true`이면 `metronome_backend.exe`가 Windows 콘솔을 할당해 로그를 표시하고, `false`이면 생성한 콘솔을 숨긴다. 기본값은 `true`이며 실행 중 변경 사항도 watcher가 반영한다.
 
 ## Data location
 
