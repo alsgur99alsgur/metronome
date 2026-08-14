@@ -16,7 +16,7 @@ def _temporary_path(final_path):
 
 
 def _replace(temporary, final_path):
-    with open(temporary, "rb") as file:
+    with open(temporary, "r+b") as file:
         os.fsync(file.fileno())
     os.replace(temporary, final_path)
 

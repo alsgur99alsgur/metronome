@@ -2,6 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { useErrorDialog } from "../errors/ErrorDialog";
 
+const lastConnectionStorageKey = (apiBaseUrl) =>
+  `metronome:last-oracle-connection:${apiBaseUrl}`;
+
+const loadLastConnection = (apiBaseUrl) => {
+  try {
+    return window.localStorage.getItem(lastConnectionStorageKey(apiBaseUrl)) || "";
+  } catch {
+    return "";
+  }
+};
+
+const saveLastConnection = (apiBaseUrl, connection) => {
+  try {
+    window.localStorage.setItem(lastConnectionStorageKey(apiBaseUrl), connection);
+  } catch {
+    // The selected connection still applies to the node when storage is unavailable.
+  }
+};
+
 function ColumnList({ columns = [], emptyText }) {
   return (
     <div className="column-list">
@@ -94,7 +113,20 @@ export default function DbEditor({
         if (!response.ok) return;
         const body = await response.json();
         const names = (body.connections || []).map((connection) => connection.name).filter(Boolean);
-        if (isMounted) setConnections([...new Set(names)]);
+        if (isMounted) {
+          const nextConnections = [...new Set(names)];
+          setConnections(nextConnections);
+          setEditData((current) => {
+            if (current.connection || !nextConnections.length) return current;
+            const lastConnection = loadLastConnection(apiBaseUrl);
+            return {
+              ...current,
+              connection: nextConnections.includes(lastConnection)
+                ? lastConnection
+                : nextConnections[0],
+            };
+          });
+        }
       } catch {
         if (isMounted) setConnections([]);
       }
@@ -104,10 +136,14 @@ export default function DbEditor({
     return () => {
       isMounted = false;
     };
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, setEditData]);
 
   useEffect(() => {
     if (!describeEnabled) return undefined;
+    if (!editData.connection) {
+      setColumnError(null);
+      return undefined;
+    }
 
     let isMounted = true;
     const timeout = window.setTimeout(async () => {
@@ -186,9 +222,13 @@ export default function DbEditor({
         className="text-input"
         value={editData.connection || ""}
         onChange={(event) => {
+          const nextConnection = event.target.value;
+          if (connections.includes(nextConnection)) {
+            saveLastConnection(apiBaseUrl, nextConnection);
+          }
           setEditData((current) => ({
             ...current,
-            connection: event.target.value,
+            connection: nextConnection,
           }));
         }}
       >
