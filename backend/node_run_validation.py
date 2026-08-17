@@ -78,8 +78,6 @@ def _missing_opl_fields(data):
             missing.append(f"Expression {index} Name")
         if _blank(item.get("formula")):
             missing.append(f"Expression {index} Formula")
-        if kind == "constraint" and _blank(item.get("condition")):
-            missing.append(f"Expression {index} Condition")
     return missing
 
 

@@ -98,7 +98,6 @@ const oplFields = (data) => {
     if (!["objective", "constraint"].includes(item.kind)) fields.push(`Expression ${index + 1} Type`);
     if (blank(item.name)) fields.push(`Expression ${index + 1} Name`);
     if (blank(item.formula)) fields.push(`Expression ${index + 1} Formula`);
-    if (item.kind === "constraint" && blank(item.condition)) fields.push(`Expression ${index + 1} Condition`);
   });
   return fields;
 };
