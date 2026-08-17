@@ -44,6 +44,8 @@ class Executor:
         stdout_router=None,
         stderr_router=None,
         node_log_limit_bytes=None,
+        retained_task_ids=None,
+        worker_task_semaphore=None,
     ):
         self.queue = Queue()
         self.replay_data_store = replay_data_store
@@ -64,6 +66,9 @@ class Executor:
         self.capture_task_output = capture_task_output
         self.stdout_router = stdout_router
         self.stderr_router = stderr_router
+        self.retained_task_ids = set(retained_task_ids or [])
+        self.worker_task_semaphore = worker_task_semaphore
+        self.first_error = None
         self.node_log_limit_bytes = (
             node_log_limit_bytes
             if node_log_limit_bytes is not None
@@ -75,6 +80,21 @@ class Executor:
             max(1, self.workers)
         )
         self.loop_snapshot_durations = {}
+
+    def _task_execution_context(self):
+        return {
+            "workers": self.workers,
+            "timeout": self.timeout,
+            "cancel_event": self.cancel_event,
+            "loop_thread_semaphore": self.loop_thread_semaphore,
+            "stdout_router": self.stdout_router,
+            "stderr_router": self.stderr_router,
+            "node_log_limit_bytes": self.node_log_limit_bytes,
+        }
+
+    def raise_if_failed(self):
+        if self.first_error is not None:
+            raise self.first_error
 
     def start(self):
         if self.started:
@@ -120,6 +140,8 @@ class Executor:
         result_container = {}
         error_container = {}
         output = CappedTextBuffer(self.node_log_limit_bytes)
+        if isinstance(task.execution_context, dict):
+            task.execution_context["output_buffer"] = output
         done = Event()
 
         def run():
@@ -210,7 +232,10 @@ class Executor:
     def _store_result(self, task, result):
         with self.lock:
             self.results[task.id] = result
-            if self._requires_loop_result_retention(task):
+            if (
+                task.id in self.retained_task_ids
+                or self._requires_loop_result_retention(task)
+            ):
                 self.result_consumers.pop(task.id, None)
                 return
             consumer_count = len(self._runnable_children(task))
@@ -410,7 +435,7 @@ class Executor:
     def _execute_loop_body_task(self, task, executed, loop_context, worker_id):
         if task.id in executed:
             return self.results.get(task.id)
-        for parent in task.parents:
+        for parent in task.scheduling_parents:
             if parent.internal_loop_task and parent.loop_owner_id == task.loop_owner_id:
                 self._execute_loop_body_task(parent, executed, loop_context, worker_id)
 
@@ -456,8 +481,12 @@ class Executor:
                 inputs = self._build_task_inputs(task)
                 if task.type == "opl":
                     task.model_artifact_key = None
-                with self.loop_thread_semaphore:
+                task.execution_context = self._task_execution_context()
+                if task.type == "concert":
                     result, logs = self.execute_with_timeout(task, inputs)
+                else:
+                    with self.loop_thread_semaphore:
+                        result, logs = self.execute_with_timeout(task, inputs)
                 if self.save_loop_snapshots and self._is_replay_task(task):
                     replay_save_start = time.time()
                     self.replay_data_store.save_task_result(task, result)
@@ -530,7 +559,7 @@ class Executor:
         )
         with self.lock:
             for body_task in task.loop_body_tasks:
-                for parent in body_task.parents:
+                for parent in body_task.scheduling_parents:
                     if not parent.internal_loop_task and parent.id in self.results:
                         iteration_executor.results[parent.id] = self._copy_input_value(
                             self.results[parent.id]
@@ -550,7 +579,7 @@ class Executor:
                 for body_task in pending.values():
                     internal_parents = [
                         parent.id
-                        for parent in body_task.parents
+                        for parent in body_task.scheduling_parents
                         if parent.internal_loop_task
                         and parent.loop_owner_id == body_task.loop_owner_id
                     ]
@@ -914,7 +943,12 @@ class Executor:
                     duration_ms = int((time.time() - start) * 1000)
                 else:
                     inputs = self._build_task_inputs(task)
-                    result, logs = self.execute_with_timeout(task, inputs)
+                    task.execution_context = self._task_execution_context()
+                    if self.worker_task_semaphore is None or task.type == "concert":
+                        result, logs = self.execute_with_timeout(task, inputs)
+                    else:
+                        with self.worker_task_semaphore:
+                            result, logs = self.execute_with_timeout(task, inputs)
                     duration_ms = int((time.time() - start) * 1000)
                     if self._is_replay_task(task):
                         replay_save_start = time.time()
@@ -984,6 +1018,9 @@ class Executor:
                         self.queue.put(child)
 
             except Exception as exc:
+                with self.lock:
+                    if self.first_error is None:
+                        self.first_error = exc
                 logs = getattr(exc, "__captured_traceback__", traceback.format_exc())
                 cache_duration_ms = self._save_cache_event(
                     task,

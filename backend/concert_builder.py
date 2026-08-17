@@ -28,7 +28,6 @@ SINGLE_PARENT_TARGET_TYPES = {
 }
 NO_PARENT_TARGET_TYPES = {"concertInput"}
 NO_CHILD_SOURCE_TYPES = {"concertOutput"}
-REPLAY_TASK_TYPES = {"dbRead", "concertInput", "concert", "cacheRead", "opl"}
 LOOP_NODE_TYPES = {"loopIn", "loopOut"}
 
 
@@ -201,32 +200,69 @@ def _params_for_variables(variables, params):
     return result
 
 
-def _execute_task_graph(task_map, replay_data_store=None):
-    results = {}
-    visiting = set()
-
-    def execute_task(task):
-        if task.id in results:
-            return results[task.id]
-        if task.id in visiting:
-            raise ValueError(f"Cycle detected at task: {task.name}")
-
-        visiting.add(task.id)
-        inputs = [execute_task(parent) for parent in task.parents]
-        visiting.remove(task.id)
-        results[task.id] = task.execute(inputs)
-        if replay_data_store and task.type in REPLAY_TASK_TYPES:
-            replay_data_store.save_task_result(task, results[task.id])
-        return results[task.id]
-
+def _execute_task_graph(task_map, replay_data_store, execution_context):
     outputs = [task for task in task_map.values() if task.type == "concertOutput"]
-    if outputs:
-        return execute_task(outputs[0])
+    if len(outputs) != 1:
+        raise ValueError(
+            "Called Concert must contain exactly one Concert Output node."
+        )
+    output_task = outputs[0]
+    runnable_ids = set(task_map)
+    roots = [
+        task
+        for task in task_map.values()
+        if not task.internal_loop_task
+        and not any(
+            parent.id in runnable_ids and not parent.internal_loop_task
+            for parent in task.scheduling_parents
+        )
+    ]
+    if not roots:
+        raise ValueError("Called Concert has no executable root nodes.")
 
-    last_result = None
-    for task in task_map.values():
-        last_result = execute_task(task)
-    return last_result
+    from executor import Executor
+
+    context = execution_context or {}
+    parent_output = context.get("output_buffer")
+
+    def on_nested_event(task, status, **event):
+        if parent_output is None:
+            return
+        logs = event.get("logs") or ""
+        error = event.get("error")
+        if logs:
+            parent_output.write(f"[{task.name}] {logs}\n")
+        elif error:
+            parent_output.write(f"[{task.name}] {error}\n")
+
+    nested_executor = Executor(
+        replay_data_store,
+        replay=False,
+        workers=context.get("workers"),
+        timeout=context.get("timeout"),
+        runnable_task_ids=runnable_ids,
+        cancel_event=context.get("cancel_event"),
+        loop_thread_semaphore=context.get("loop_thread_semaphore"),
+        stdout_router=context.get("stdout_router"),
+        stderr_router=context.get("stderr_router"),
+        node_log_limit_bytes=context.get("node_log_limit_bytes"),
+        retained_task_ids={output_task.id},
+        worker_task_semaphore=context.get("loop_thread_semaphore"),
+        on_event=on_nested_event,
+    )
+    try:
+        nested_executor.start()
+        for root in roots:
+            nested_executor.submit(root)
+        nested_executor.wait()
+        nested_executor.raise_if_failed()
+        if output_task.id not in nested_executor.results:
+            if nested_executor.cancel_event.is_set():
+                raise RuntimeError("Called Concert was canceled.")
+            raise RuntimeError("Called Concert Output did not produce a result.")
+        return nested_executor.results[output_task.id]
+    finally:
+        nested_executor.shutdown()
 
 
 def _bind_records_from_inputs(inputs, params, bind_names):
@@ -466,6 +502,7 @@ def _build_concert_call_task(
 ):
     concert_name = data.get("concertName", "")
     input_params = _parse_mapping(data.get("inputParams", {}))
+    task = None
 
     def concert_call(inputs):
         if not concert_name:
@@ -482,6 +519,15 @@ def _build_concert_call_task(
         concert = concert_store.load_by_basename(concert_name)
         resolved_concert_name = concert["name"]
         resolved_concert_id = ConcertStore.validate_id(concert.get("concertId"))
+        output_count = sum(
+            1 for node in concert.get("nodes", [])
+            if node.get("type") == "concertOutput"
+        )
+        if output_count != 1:
+            raise ValueError(
+                f"Called Concert '{resolved_concert_name}' must contain exactly one "
+                f"Concert Output node; found {output_count}."
+            )
         if resolved_concert_id in call_ids:
             raise RecursionError(
                 f"Concert self-call is not allowed: {' -> '.join(call_stack + [resolved_concert_name])}"
@@ -535,9 +581,18 @@ def _build_concert_call_task(
             resource_store=resource_store,
             run_id=run_id,
         )
-        return _execute_task_graph(sub_task_map, replay_data_store=sub_replay_data_store)
+        for sub_task in sub_task_map.values():
+            if sub_task.type == "opl":
+                sub_task.model_artifact_dirs = [sub_replay_data_store.path]
+                sub_task.model_artifact_key = None
+        return _execute_task_graph(
+            sub_task_map,
+            replay_data_store=sub_replay_data_store,
+            execution_context=task.execution_context,
+        )
 
-    return Task(task_id, name, "concert", concert_call)
+    task = Task(task_id, name, "concert", concert_call)
+    return task
 
 
 def _children_by_source(edges):
@@ -623,6 +678,16 @@ def _link_tasks(parent, child):
     if child in parent.children:
         return
     parent >> child
+
+
+def _link_loop_result(loop_task, loop_out_task, child):
+    """Schedule after the Loop task, but read data from its explicit Loop Out."""
+    if child in loop_task.children:
+        return
+    loop_task.children.append(child)
+    child.scheduling_parents.append(loop_task)
+    child.parents.append(loop_out_task)
+    child.remaining += 1
 
 
 def selected_concert_graph(nodes, edges, selected_id):
@@ -801,7 +866,12 @@ def build_concert(
         target_id = edge["target"]
         source_loop = _loop_for_out_id(loop_blocks, source_id)
         if source_loop and loop_owner_by_node.get(target_id) != source_loop:
-            source_id = source_loop
+            _link_loop_result(
+                task_map[source_loop],
+                task_map[source_id],
+                task_map[target_id],
+            )
+            continue
 
         source_owner = loop_owner_by_node.get(source_id)
         target_owner = loop_owner_by_node.get(target_id)
@@ -831,7 +901,10 @@ def build_concert(
             task
             for task in loop_task.loop_body_tasks
             if task.id != block["loop_out_id"]
-            and not any(parent.id in direct_body_ids for parent in task.parents)
+            and not any(
+                parent.id in direct_body_ids
+                for parent in task.scheduling_parents
+            )
         ]
 
     return task_map

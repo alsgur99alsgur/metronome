@@ -129,7 +129,10 @@ def run_concert_process(concert, input_variables):
         roots = [
             task for task in task_map.values()
             if task.id in runnable_ids and not task.internal_loop_task
-            and not any(parent.id in runnable_ids and not parent.internal_loop_task for parent in task.parents)
+            and not any(
+                parent.id in runnable_ids and not parent.internal_loop_task
+                for parent in task.scheduling_parents
+            )
         ]
         if not roots:
             raise ValueError("Concert has no executable root nodes")

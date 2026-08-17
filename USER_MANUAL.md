@@ -306,8 +306,10 @@ Variable 타입은 NonNegative Real, NonNegative Integer, Binary를 지원한다
 
 - 선택한 이름으로 Playing 트리에서 대상 Concert를 찾는다.
 - 대상이 없으면 not found, 같은 basename이 둘 이상이면 duplicate 오류가 발생한다.
+- 호출 대상에는 정확히 하나의 Concert Output 노드가 있어야 하며, 없거나 여러 개면 실행을 거부한다.
 - 로드된 Concert ID를 이용해 self call과 recursive call을 차단한다.
 - 입력 DataFrame은 호출 대상의 Concert Input으로 전달되고, Concert Output 결과가 호출 노드의 결과가 된다.
+- 호출 대상도 같은 child process 안의 Executor로 실행되므로 일반 실행과 동일하게 DAG 분기와 Loop iteration을 병렬 처리한다.
 - 호출자 Input 변수와 호출 대상 Input 변수는 이름이 같아도 별도 공간으로 구분한다.
 - Global 변수는 호출 경계를 넘어 전달하지 않는다.
 

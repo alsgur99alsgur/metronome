@@ -104,13 +104,14 @@ Timer와 Event는 저장된 Concert 전체 실행만 지원한다. 선택 실행
 1. 수동 실행은 요청에 포함된 편집 중 Concert graph를 `main._queue_run`이 스냅샷으로 만들고, Timer/Event는 `main._queue_saved_concert`가 저장된 Concert를 로드한 뒤 `_queue_run`에 전달한다.
 2. `concert_builder.build_concert`가 node JSON을 `Task` graph로 만든다.
 3. loop block과 parent/child dependency를 연결하고 선택 실행이면 필요한 graph만 수집한다.
-4. 실행마다 새 child process가 전달받은 Concert 스냅샷을 사용하고, 그 process 내부 `Executor`가 worker thread queue에서 Task를 실행한다. Concert Call의 하위 Concert는 Playing 저장소에서 ID로 조회한다.
+4. 실행마다 새 child process가 전달받은 Concert 스냅샷을 사용하고, 그 process 내부 `Executor`가 worker thread queue에서 Task를 실행한다. Concert Call의 하위 Concert는 Playing 저장소에서 basename으로 찾아 같은 child 안의 하위 `Executor`로 실행한다. 하위 Executor는 상위 실행의 worker 설정, timeout, cancel, 로그 라우터와 Loop semaphore를 공유하므로 하위 Loop도 일반 실행과 같은 iteration·병렬 경로를 사용한다.
 5. node event가 in-memory run state와 `CacheDataStore`를 갱신한다.
 6. 새 실행은 replay parquet/metadata를 저장하고, replay 실행은 저장된 결과를 읽는다.
 
 Loop 내부 DAG는 dependency level별 독립 분기를 병렬 실행한다. `eachRow`와 `groupBy`는 iteration별 결과 공간을 분리한 뒤 iteration도 thread pool에서 병렬 실행하고, 최종 출력은 원래 row/group 순서로 결합한다. `allRows`는 이전 iteration 결과가 다음 iteration 입력이므로 iteration은 순차지만 각 iteration 내부 분기는 병렬이다. 한 Concert 내 Loop 작업 thread 수는 `executor.workers`를 넘지 않으며, Replay/Run Cache에는 최외곽 Loop의 마지막 iteration snapshot만 저장한다.
 
 최외곽 마지막 iteration snapshot에서 Loop 내부 일반 노드는 해당 iteration 결과를 저장하지만, 각 Loop In 노드는 분할된 row/group 대신 그 Loop In의 유일한 부모가 전달한 전체 DataFrame을 Run Cache에 저장한다.
+Loop Out에서 Loop 외부 노드로 이어지는 edge는 Loop In 완료 시점에 downstream을 스케줄링하지만, downstream의 데이터 입력은 화면에서 연결된 Loop Out 결과를 그대로 사용한다. 실행 의존성과 데이터 부모를 별도로 유지하므로 Concert Output을 포함한 외부 노드가 Loop In 부모 데이터나 다른 내부 노드 결과를 대신 받지 않는다.
 
 ## Node implementations
 
@@ -123,6 +124,7 @@ Loop 내부 DAG는 dependency level별 독립 분기를 병렬 실행한다. `ea
 - nested Concert Call과 self-call/depth 방지
 
 Concert Call 경계에서는 호출자와 호출 대상의 Input 값만 각각 `callerParams`, `calledParams`로 전달·기록한다. 양쪽 Input 이름이 같아도 별도 공간으로 유지하며 Global 변수는 호출 경계를 넘어 전달하거나 Replay 목록에 노출하지 않는다. 호출 대상의 Global 변수는 해당 Concert 내부 실행에서만 사용한다.
+호출 대상에는 정확히 하나의 Concert Output이 있어야 한다. 없거나 여러 개면 실행 전에 명확히 실패하며, 파일상 마지막 노드 결과를 대신 반환하지 않는다.
 - Concert/Stage Cache resource
 - Loop In/Out
 

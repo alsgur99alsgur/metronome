@@ -10,6 +10,7 @@ class Task:
         self.type = task_type
         self.func = func
         self.parents: List[Task] = []
+        self.scheduling_parents: List[Task] = []
         self.children: List[Task] = []
         self.remaining = 0
         self.internal_loop_task = False
@@ -25,10 +26,12 @@ class Task:
         self.model_artifact_key = None
         self.cache_scope = None
         self.cache_file_key = None
+        self.execution_context = None
 
     def __rshift__(self, other):
         self.children.append(other)
         other.parents.append(self)
+        other.scheduling_parents.append(self)
         other.remaining += 1
         return other
 
