@@ -396,11 +396,6 @@ button:disabled {
   color: #15803d;
 }
 
-.danger-text-button {
-  border-color: transparent;
-  color: #b91c1c;
-}
-
 .empty-list,
 .dialog-message {
   color: #64748b;
@@ -813,6 +808,30 @@ button:disabled {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+button.row-delete-button {
+  min-width: 58px;
+  min-height: 24px;
+  height: 24px;
+  border: 1px solid #dc2626;
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: #ffffff;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+button.row-delete-button:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+button.row-delete-button:disabled {
+  border-color: #fecaca;
+  background: #ffffff;
+  color: #fca5a5;
 }
 
 /* High-density desktop layout aligned with the main Concert UI. */

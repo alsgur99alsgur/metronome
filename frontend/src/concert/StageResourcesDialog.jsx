@@ -104,7 +104,7 @@ export default function StageResourcesDialog({ apiBaseUrl, serverName, onClose }
           <button disabled={busy || !name.trim()} onClick={create}>Create</button>
         </div>
         <div className="stage-resource-list">
-          {resources.map((resource) => <div className="stage-resource-row" key={resource.name}><span>Cache</span><strong>{resource.name}</strong><button disabled={busy} onClick={() => view(resource)}>View</button><button className="danger-button" disabled={busy} onClick={() => { setPendingDelete(resource); setDeleteName(""); }}>Delete</button></div>)}
+          {resources.map((resource) => <div className="stage-resource-row" key={resource.name}><span>Cache</span><strong>{resource.name}</strong><button disabled={busy} onClick={() => view(resource)}>View</button><button className="row-delete-button" disabled={busy} onClick={() => { setPendingDelete(resource); setDeleteName(""); }}>Delete</button></div>)}
           {!resources.length && <p className="muted">No Stage Caches.</p>}
         </div>
       </section>

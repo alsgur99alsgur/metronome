@@ -42,7 +42,6 @@ def _initialize_data_directory():
             {"name": "Local", "host": "localhost", "port": 8000},
         ],
         "connections.json": {"connections": []},
-        "connection_schema_cache.json": {},
         "timers.json": [],
     }
     for file_name, payload in defaults.items():

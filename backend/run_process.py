@@ -195,6 +195,7 @@ def run_concert_process(concert, input_variables):
         }
 
         had_error = False
+        first_db_read_schemas = {}
 
         def on_event(task, status, **event):
             nonlocal had_error
@@ -206,10 +207,18 @@ def run_concert_process(concert, input_variables):
                 timing["cacheSaveMs"] += event["cache_duration_ms"]
             if event.get("replay_save_duration_ms") is not None:
                 timing["replaySaveMs"] += event["replay_save_duration_ms"]
+            result = event.get("result")
+            if task.type == "dbRead" and isinstance(result, dict):
+                schema = result.get("dbReadSchema")
+                if schema is not None:
+                    schema = first_db_read_schemas.setdefault(task.id, schema)
+                    result = {**result, "dbReadSchema": schema}
+                    if cache_store is not None:
+                        cache_store.remember_db_read_schema(task, schema)
             emit(
                 "node", nodeId=task.id, status=status,
                 logs=event.get("logs", ""), error=event.get("error"),
-                result=event.get("result"), durationMs=event.get("duration_ms"),
+                result=result, durationMs=event.get("duration_ms"),
                 cacheDurationMs=event.get("cache_duration_ms"),
                 replaySaveDurationMs=event.get("replay_save_duration_ms"),
                 loopIterations=task.loop_iterations,

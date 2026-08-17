@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
-import { useErrorDialog } from "../errors/ErrorDialog";
 
 function ColumnList({ columns = [], emptyText }) {
   return (
@@ -20,31 +19,16 @@ function ColumnList({ columns = [], emptyText }) {
 }
 
 function InputColumnsPanel({ inputDataframes = [] }) {
-  const [activeInputId, setActiveInputId] = useState(null);
-  const activeInput = inputDataframes.find((input) => input.id === activeInputId) || inputDataframes[0] || null;
+  const activeInput = inputDataframes[0] || null;
 
   return (
     <aside className="column-side-panel">
       <div className="column-title">Input Columns</div>
       {inputDataframes.length ? (
-        <>
-          <div className="python-input-tabs">
-            {inputDataframes.map((input) => (
-              <button
-                className={`python-input-tab ${activeInput?.id === input.id ? "active" : ""}`}
-                key={input.id}
-                onClick={() => setActiveInputId(input.id)}
-                title={input.name}
-              >
-                {input.name}
-              </button>
-            ))}
-          </div>
-          <ColumnList
-            columns={activeInput?.columns || []}
-            emptyText={activeInput?.status === "not_run" ? "Run parent node to inspect columns." : "No DataFrame columns."}
-          />
-        </>
+        <ColumnList
+          columns={activeInput?.columns || []}
+          emptyText={activeInput?.status === "not_run" ? "Run parent node to inspect columns." : "No DataFrame columns."}
+        />
       ) : (
         <ColumnList columns={[]} emptyText="No connected inputs." />
       )}
@@ -52,10 +36,11 @@ function InputColumnsPanel({ inputDataframes = [] }) {
   );
 }
 
-function OutputColumnsPanel({ columns = [], emptyText }) {
+function OutputColumnsPanel({ columns = [], emptyText, error }) {
   return (
     <aside className="column-side-panel">
       <div className="column-title">Output Columns</div>
+      {error && <div className="column-schema-error">{error}</div>}
       <ColumnList columns={columns} emptyText={emptyText} />
     </aside>
   );
@@ -68,22 +53,17 @@ export default function DbEditor({
   inputDataframes = [],
   outputColumns = [],
   outputMessage = "No result columns.",
+  outputError = "",
   describeEnabled = true,
   apiBaseUrl = "http://localhost:8000",
   globalVariables = [],
   inputVariables = [],
 }) {
-  const { showError } = useErrorDialog();
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const decorationIdsRef = useRef([]);
   const [editorReady, setEditorReady] = useState(0);
   const [connections, setConnections] = useState([]);
-  const [columnError, setColumnError] = useState(null);
-
-  useEffect(() => {
-    if (columnError) showError(columnError);
-  }, [columnError, showError]);
 
   useEffect(() => {
     let isMounted = true;
@@ -110,10 +90,7 @@ export default function DbEditor({
 
   useEffect(() => {
     if (!describeEnabled) return undefined;
-    if (!editData.connection) {
-      setColumnError(null);
-      return undefined;
-    }
+    if (!editData.connection) return undefined;
 
     let isMounted = true;
     const timeout = window.setTimeout(async () => {
@@ -128,18 +105,45 @@ export default function DbEditor({
             inputVariables,
           }),
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          const message = await response.text();
+          if (isMounted) {
+            setEditData((current) => ({
+              ...current,
+              outputColumns: [],
+              dbReadSchema: null,
+              schemaError: message || `Schema inference failed (${response.status}).`,
+            }));
+          }
+          return;
+        }
         const body = await response.json();
         if (!isMounted) return;
+        if (body.error) {
+          setEditData((current) => ({
+            ...current,
+            outputColumns: [],
+            dbReadSchema: null,
+            schemaError: body.error,
+          }));
+          return;
+        }
         const nextColumns = body.columns || [];
-        setColumnError(body.error || null);
         setEditData((current) => ({
           ...current,
           outputColumns: nextColumns,
+          dbReadSchema: { columns: nextColumns },
+          schemaError: undefined,
         }));
       } catch (error) {
-        if (!isMounted) return;
-        setColumnError(error.message);
+        if (isMounted) {
+          setEditData((current) => ({
+            ...current,
+            outputColumns: [],
+            dbReadSchema: null,
+            schemaError: `Schema inference failed: ${error.message}`,
+          }));
+        }
       }
     }, 350);
 
@@ -195,6 +199,7 @@ export default function DbEditor({
           setEditData((current) => ({
             ...current,
             connection: event.target.value,
+            schemaError: undefined,
           }));
         }}
       >
@@ -247,11 +252,16 @@ export default function DbEditor({
               setEditData((current) => ({
                 ...current,
                 sql: value,
+                schemaError: undefined,
               }));
             }}
           />
         </div>
-        <OutputColumnsPanel columns={outputColumns} emptyText={outputMessage} />
+        <OutputColumnsPanel
+          columns={outputColumns}
+          emptyText={outputMessage}
+          error={outputError}
+        />
       </div>
     </div>
   );

@@ -148,7 +148,6 @@ Loop 내부 결과와 OPL artifact는 iteration별로 저장하지 않으며 가
   config.json
   servers.json
   connections.json
-  connection_schema_cache.json
   timers.json
 ```
 
@@ -175,7 +174,7 @@ Stage Cache는 immutable version Parquet와 current pointer를 사용하고 이�
 
 백엔드는 프런트 및 Admin 프런트와 독립적으로 실행·종료한다. 두 UI를 닫아도 백엔드는 종료되지 않으며, 백엔드도 UI 프로세스를 제어하지 않는다.
 
-`servers.json`에는 정확히 하나의 `Local` 항목이 필요하다. `connections.json`은 Oracle 연결 설정, `connection_schema_cache.json`은 describe 실패 시 사용할 schema cache다.
+`servers.json`에는 정확히 하나의 `Local` 항목이 필요하고 `connections.json`은 Oracle 연결 설정을 저장한다. DB Read의 describe 기반 스키마 추론이 성공하면 Oracle 컬럼 metadata를 해당 노드의 `dbReadSchema`로 프런트 메모리에 반영하고, 실패하면 메모리 계약을 제거한다. 사용자가 Concert를 저장할 때만 이 상태가 파일에 기록된다. 실제 실행에서도 정상 DB Read 결과로 계약을 갱신하며, Loop 내부 DB Read는 해당 실행에서 node ID별 최초 성공 조회의 계약을 즉시 확정하고 이후 iteration이 덮어쓰지 않는다. SQL을 수정해 노드에 반영하면 기존 계약은 메모리에서 제거된다. PM 연결 실패 시에는 저장 계약으로 빈 DataFrame을 만들고, 계약이 없으면 명확히 실패한다.
 
 ## Validation
 

@@ -235,7 +235,7 @@ function SetTimerView({ server }) {
           <td className="center-cell"><input type="checkbox" checked={row.enabled} onChange={(event) => updateRow(row.id, { enabled: event.target.checked })} /></td>
           <td><span className={`status-badge${row.running ? " running" : ""}`}>{row.running ? "Running" : "Stopped"}</span></td>
           <td>{row.lastRunAt ? new Date(row.lastRunAt).toLocaleString() : "—"}</td><td>{row.lastDurationMs == null ? "—" : `${(row.lastDurationMs / 1000).toFixed(3)}s`}</td>
-          <td><button className="danger-text-button" type="button" onClick={() => { setRows((current) => current.filter((item) => item.id !== row.id)); if (selectedId === row.id) setSelectedId(null); }}>Delete</button></td>
+          <td><button className="row-delete-button" type="button" onClick={() => { setRows((current) => current.filter((item) => item.id !== row.id)); if (selectedId === row.id) setSelectedId(null); }}>Delete</button></td>
         </tr>)}</tbody></table></div>
       <section className="input-values-panel"><div className="input-values-title"><strong>Concert Input Values</strong><span>{selectedRow?.concertName || "Select a timer row"}</span></div>
         {!selectedRow && <div className="empty-list">Select a timer row to edit its Concert input values.</div>}
@@ -326,7 +326,7 @@ function DbConnectionsView({ server }) {
           <td className="dsn-cell"><span title={row.dsn}>{row.dsn}</span><button type="button" onClick={(event) => { event.stopPropagation(); setSelectedKey(row.key); setDsnRowKey(row.key); }}>Edit</button></td>
           <td className="center-cell"><input type="checkbox" checked={row.enable} onChange={(event) => updateRow(row.key, { enable: event.target.checked })} /></td>
           <td className="center-cell"><input type="checkbox" checked={row.pm} onChange={(event) => updateRow(row.key, { pm: event.target.checked })} /></td>
-          <td><button className="danger-text-button" type="button" onClick={() => { setRows((current) => current.filter((item) => item.key !== row.key)); if (selectedKey === row.key) setSelectedKey(null); }}>Delete</button></td>
+          <td><button className="row-delete-button" type="button" onClick={() => { setRows((current) => current.filter((item) => item.key !== row.key)); if (selectedKey === row.key) setSelectedKey(null); }}>Delete</button></td>
         </tr>)}</tbody></table></div>
       {dsnRow && <DsnEditorDialog value={dsnRow.dsn} onChange={(dsn) => updateRow(dsnRow.key, { dsn })} onClose={() => setDsnRowKey(null)} />}
       <MessageDialog type={error ? "error" : "success"} message={error || message} onClose={() => { setError(""); setMessage(""); }} />

@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import re
@@ -16,11 +15,9 @@ BACKEND_ROOT = os.environ.get(
     os.path.dirname(os.path.abspath(__file__)),
 )
 CONNECTIONS_PATH = os.path.join(BACKEND_ROOT, "connections.json")
-SCHEMA_CACHE_PATH = os.path.join(BACKEND_ROOT, "connection_schema_cache.json")
 _BIND_PATTERN = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 _SQL_COMMENT_OR_STRING_PATTERN = re.compile(r"(--[^\n]*|/\*.*?\*/|'(?:''|[^'])*')", re.DOTALL)
 _POOL_LOCK = Lock()
-_SCHEMA_LOCK = Lock()
 _ORACLE_CLIENT_LOCK = Lock()
 _POOL_TIMING_LOCK = Lock()
 _ORACLE_CLIENT_INITIALIZED = False
@@ -167,47 +164,8 @@ def _close_pools(connection_names):
             pass
 
 
-def _read_schema_cache():
-    if not os.path.exists(SCHEMA_CACHE_PATH):
-        return {}
-    with open(SCHEMA_CACHE_PATH, "r", encoding="utf-8") as file:
-        payload = json.load(file)
-    if not isinstance(payload, dict):
-        raise ValueError("connection_schema_cache.json must contain an object.")
-    return payload
-
-
 def _normalize_sql(sql):
     return (sql or "").strip().rstrip(";")
-
-
-def _schema_key(connection_name, sql):
-    digest = hashlib.sha256(_normalize_sql(sql).encode("utf-8")).hexdigest()
-    return f"{connection_name}:{digest}"
-
-
-def _save_schema(connection_name, sql, columns):
-    with _SCHEMA_LOCK:
-        payload = _read_schema_cache()
-        payload[_schema_key(connection_name, sql)] = {"connection": connection_name, "sqlHash": _schema_key(connection_name, sql).split(":", 1)[1], "columns": columns}
-        _write_json_atomic(SCHEMA_CACHE_PATH, payload)
-
-
-def _load_schema(connection_name, sql):
-    with _SCHEMA_LOCK:
-        item = _read_schema_cache().get(_schema_key(connection_name, sql))
-    if not item:
-        raise OracleUnavailable(f"PM schema cache not found for connection {connection_name}.")
-    return item.get("columns") or []
-
-
-def _invalidate_schema(connection_names):
-    names = set(connection_names)
-    with _SCHEMA_LOCK:
-        payload = _read_schema_cache()
-        next_payload = {key: value for key, value in payload.items() if value.get("connection") not in names}
-        if next_payload != payload:
-            _write_json_atomic(SCHEMA_CACHE_PATH, next_payload)
 
 
 def save_admin_connections(items):
@@ -219,7 +177,6 @@ def save_admin_connections(items):
     seen_names = set()
     saved = []
     pool_changed_names = set()
-    schema_changed_names = set()
     for item in items:
         if not isinstance(item, dict):
             raise ValueError("Each connection must be an object.")
@@ -246,19 +203,10 @@ def save_admin_connections(items):
         previous = existing.get(original_name) if original_name else None
         if previous and (previous != next_item or original_name != name):
             pool_changed_names.update((original_name, name))
-        if previous and (
-            original_name != name
-            or previous["user"] != user
-            or previous["password"] != password
-            or previous["dsn"] != dsn
-        ):
-            schema_changed_names.update((original_name, name))
     deleted_names = set(existing) - seen_originals
     pool_changed_names.update(deleted_names)
-    schema_changed_names.update(deleted_names)
     _write_json_atomic(CONNECTIONS_PATH, {"connections": saved})
     _close_pools(pool_changed_names)
-    _invalidate_schema(schema_changed_names)
     return list_admin_connections()
 
 
@@ -368,22 +316,15 @@ def describe_oracle_query(connection_name, sql, params=None):
     sql = _normalize_sql(sql)
     if not sql:
         return []
-    config = load_connection(connection_name)
-    try:
-        _, conn = acquire_connection(connection_name)
-    except OracleConnectionFailure:
-        if config.pm:
-            return _load_schema(connection_name, sql)
-        raise
+    _, conn = acquire_connection(connection_name)
     with conn:
         cursor = conn.cursor()
         cursor.execute(f"select * from ({sql}) where 1 = 0", params or {})
         columns = _column_metadata(cursor)
-    _save_schema(connection_name, sql, columns)
     return columns
 
 
-def execute_oracle_query(connection_name, sql, params=None):
+def execute_oracle_query(connection_name, sql, params=None, fallback_columns=None):
     sql = _normalize_sql(sql)
     if not sql:
         raise OracleUnavailable("DB Read node SQL is empty.")
@@ -392,29 +333,39 @@ def execute_oracle_query(connection_name, sql, params=None):
         _, conn = acquire_connection(connection_name)
     except OracleConnectionFailure:
         if config.pm:
-            return _empty_dataframe(_load_schema(connection_name, sql))
+            if not fallback_columns:
+                raise OracleUnavailable(
+                    "DB Read PM fallback requires a saved output column contract."
+                )
+            return _empty_dataframe(fallback_columns)
         raise
     with conn:
         cursor = conn.cursor()
         cursor.execute(sql, params or {})
         metadata = _column_metadata(cursor)
         rows = cursor.fetchall()
-    _save_schema(connection_name, sql, metadata)
-    return pd.DataFrame(rows, columns=[column["name"] for column in metadata])
+    result = pd.DataFrame(rows, columns=[column["name"] for column in metadata])
+    result.attrs["oracle_columns"] = metadata
+    return result
 
 
 def _rewrite_binds(sql, bind_names, suffix):
     return _BIND_PATTERN.sub(lambda match: f":{match.group(1)}_{suffix}" if match.group(1) in bind_names else match.group(0), sql)
 
 
-def execute_oracle_query_records(connection_name, sql, bind_records):
+def execute_oracle_query_records(connection_name, sql, bind_records, fallback_columns=None):
     sql = _normalize_sql(sql)
     if not sql:
         raise OracleUnavailable("DB Read node SQL is empty.")
     records = bind_records or [{}]
     bind_names = _bind_names_from_sql(sql)
     if len(records) == 1 or not bind_names:
-        return execute_oracle_query(connection_name, sql, {name: records[0].get(name) for name in bind_names})
+        return execute_oracle_query(
+            connection_name,
+            sql,
+            {name: records[0].get(name) for name in bind_names},
+            fallback_columns=fallback_columns,
+        )
     batch_sql = "\nunion all\n".join(f"select * from ({_rewrite_binds(sql, bind_names, index)})" for index in range(len(records)))
     bind_params = {f"{name}_{index}": record.get(name) for index, record in enumerate(records) for name in bind_names}
     config = load_connection(connection_name)
@@ -422,15 +373,20 @@ def execute_oracle_query_records(connection_name, sql, bind_records):
         _, conn = acquire_connection(connection_name)
     except OracleConnectionFailure:
         if config.pm:
-            return _empty_dataframe(_load_schema(connection_name, sql))
+            if not fallback_columns:
+                raise OracleUnavailable(
+                    "DB Read PM fallback requires a saved output column contract."
+                )
+            return _empty_dataframe(fallback_columns)
         raise
     with conn:
         cursor = conn.cursor()
         cursor.execute(batch_sql, bind_params)
         metadata = _column_metadata(cursor)
         rows = cursor.fetchall()
-    _save_schema(connection_name, sql, metadata)
-    return pd.DataFrame(rows, columns=[column["name"] for column in metadata])
+    result = pd.DataFrame(rows, columns=[column["name"] for column in metadata])
+    result.attrs["oracle_columns"] = metadata
+    return result
 
 
 def execute_oracle_write_records(connection_name, sql, bind_records):

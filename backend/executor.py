@@ -163,7 +163,7 @@ class Executor:
 
     def _summarize_result(self, result):
         if isinstance(result, pd.DataFrame):
-            return {
+            summary = {
                 "kind": "dataframe",
                 "rows": int(len(result)),
                 "columns": [str(column) for column in result.columns],
@@ -172,6 +172,9 @@ class Executor:
                     for column, dtype in zip(result.columns, result.dtypes)
                 },
             }
+            if result.attrs.get("db_read_schema") is not None:
+                summary["dbReadSchema"] = result.attrs["db_read_schema"]
+            return summary
         if result is None:
             return {"kind": "none"}
         return {"kind": type(result).__name__, "repr": repr(result)[:1000]}

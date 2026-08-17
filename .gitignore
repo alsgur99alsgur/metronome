@@ -22,6 +22,7 @@ backend/stage/
 .env.*
 
 events.md
+*.parquet
 
 *.concert
 !backend/examples/backend_performance_benchmark.concert

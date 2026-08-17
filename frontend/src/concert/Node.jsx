@@ -5,9 +5,9 @@ import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
 import LoginOutlinedIcon from "@mui/icons-material/LoginOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import MemoryOutlinedIcon from "@mui/icons-material/MemoryOutlined";
-import RepeatOutlinedIcon from "@mui/icons-material/RepeatOutlined";
 import StorageOutlinedIcon from "@mui/icons-material/StorageOutlined";
 import NotesOutlinedIcon from "@mui/icons-material/NotesOutlined";
+import LoopIcon from "@mui/icons-material/Loop";
 import SvgIcon from "@mui/material/SvgIcon";
 
 function PythonIcon(props) {
@@ -24,6 +24,24 @@ function PythonIcon(props) {
       <circle cx="9.1" cy="4.8" r="0.8" fill="#ffffff" />
       <circle cx="14.9" cy="19.2" r="0.8" fill="#ffffff" />
     </SvgIcon>
+  );
+}
+
+function LoopInIcon() {
+  return (
+    <span className="loop-labeled-icon" aria-hidden="true">
+      <LoopIcon />
+      <span>IN</span>
+    </span>
+  );
+}
+
+function LoopOutIcon() {
+  return (
+    <span className="loop-labeled-icon" aria-hidden="true">
+      <LoopIcon />
+      <span>OUT</span>
+    </span>
   );
 }
 
@@ -87,8 +105,8 @@ export const nodeIcon = {
   concertOutput: LogoutOutlinedIcon,
   cacheRead: MemoryOutlinedIcon,
   cacheWrite: MemoryOutlinedIcon,
-  loopIn: RepeatOutlinedIcon,
-  loopOut: RepeatOutlinedIcon,
+  loopIn: LoopInIcon,
+  loopOut: LoopOutIcon,
   text: NotesOutlinedIcon,
 };
 

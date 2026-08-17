@@ -77,14 +77,34 @@ class CacheDataStore:
                 self.metadata["timing"] = timing
             self._write_metadata()
 
+    def remember_db_read_schema(self, task, schema):
+        if task.type != "dbRead" or not schema:
+            return
+        with self.lock:
+            nodes = self.metadata.setdefault("nodes", {})
+            existing = nodes.get(task.id) or {
+                "id": task.id,
+                "name": task.name,
+                "type": task.type,
+            }
+            if existing.get("dbReadSchema") is not None:
+                return
+            existing["dbReadSchema"] = schema
+            nodes[task.id] = existing
+            self.metadata["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+            self._write_metadata()
+
     @staticmethod
     def _dataframe_summary(df):
-        return {
+        summary = {
             "kind": "dataframe",
             "rows": int(len(df)),
             "columns": list(df.columns),
             "dtypes": {str(column): str(dtype) for column, dtype in df.dtypes.items()},
         }
+        if df.attrs.get("db_read_schema") is not None:
+            summary["dbReadSchema"] = df.attrs["db_read_schema"]
+        return summary
 
     def save_task_event(
         self,
@@ -131,6 +151,13 @@ class CacheDataStore:
             node["repr"] = repr(result)[:1000]
 
         with self.lock:
+            existing_schema = (
+                self.metadata.get("nodes", {})
+                .get(task.id, {})
+                .get("dbReadSchema")
+            )
+            if existing_schema is not None:
+                node["dbReadSchema"] = existing_schema
             self.metadata.setdefault("nodes", {})[task.id] = node
             self.metadata["updatedAt"] = datetime.utcnow().isoformat() + "Z"
             self._write_metadata()
@@ -250,6 +277,7 @@ class CacheDataStore:
                 "error": node.get("error"),
                 "rows": node.get("rows"),
                 "columns": node.get("columns", []),
+                "dbReadSchema": node.get("dbReadSchema"),
                 "durationMs": node.get("durationMs"),
                 "loopIterations": node.get("loopIterations"),
                 "cacheDurationMs": node.get("cacheDurationMs"),

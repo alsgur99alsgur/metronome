@@ -806,8 +806,9 @@ function LoopInEditor({ editData, setEditData, inputColumns = [] }) {
                     <input className="text-input" value={columnName} readOnly />
                     <button
                       type="button"
+                      className="row-delete-button"
                       onClick={() => updateGroupByColumn(columnName, false)}
-                      title={`Remove ${columnName}`}
+                      title={`Delete ${columnName}`}
                     >
                       Delete
                     </button>
@@ -847,7 +848,7 @@ const loopStopOperators = ["==", "!=", ">=", ">", "<=", "<"];
 function LoopOutEditor({
   editData,
   setEditData,
-  inputColumns = [],
+  outputColumns = [],
   iterationMode = "allRows",
 }) {
   const [selectedInputColumns, setSelectedInputColumns] = useState(new Set());
@@ -857,6 +858,12 @@ function LoopOutEditor({
   const stopConditions = Array.isArray(editData.stopConditions)
     ? editData.stopConditions
     : [];
+  const conditionColumnNames = new Set(
+    stopConditions.map((condition) => condition.column),
+  );
+  const availableOutputColumns = outputColumns.filter(
+    (column) => !conditionColumnNames.has(column.name),
+  );
 
   const toggleInputColumn = (columnName, checked) => {
     setSelectedInputColumns((current) => {
@@ -892,6 +899,22 @@ function LoopOutEditor({
       };
     });
     setSelectedInputColumns(new Set());
+  };
+
+  const addConditionColumn = (columnName) => {
+    if (!columnName || conditionColumnNames.has(columnName)) return;
+    setEditData((current) => ({
+      ...current,
+      stopConditions: [
+        ...(Array.isArray(current.stopConditions) ? current.stopConditions : []),
+        { column: columnName, operator: "==", value: "" },
+      ],
+    }));
+    setSelectedInputColumns((current) => {
+      const next = new Set(current);
+      next.delete(columnName);
+      return next;
+    });
   };
 
   const updateStopCondition = (index, patch) => {
@@ -936,9 +959,21 @@ function LoopOutEditor({
     setSelectedConditionColumns(new Set());
   };
 
+  const removeCondition = (index) => {
+    setEditData((current) => ({
+      ...current,
+      stopConditions: (Array.isArray(current.stopConditions)
+        ? current.stopConditions
+        : []
+      ).filter((_, conditionIndex) => conditionIndex !== index),
+    }));
+  };
+
   return (
     <div className="node-form-editor">
-      {iterationMode === "allRows" ? (
+      <div className="loop-out-editor-grid">
+        <div className="loop-out-settings">
+        {iterationMode === "allRows" ? (
         <>
           <label className="field-label">Max Iterations</label>
           <input
@@ -957,13 +992,18 @@ function LoopOutEditor({
           <label className="field-label">Stop Conditions</label>
           <div className="loop-stop-layout">
         <div className="loop-stop-panel">
-          <div className="column-title">Input Columns</div>
+          <div className="column-title">Condition Columns</div>
           <div className="column-list loop-stop-column-list">
-            {inputColumns.length ? (
-              inputColumns.map((column) => (
+            {availableOutputColumns.length ? (
+              availableOutputColumns.map((column) => (
                 <label
                   className="loop-column-checkbox-row"
                   key={`${column.name}-${column.type}`}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    addConditionColumn(column.name);
+                  }}
+                  title="Double-click to add this condition column"
                 >
                   <input
                     type="checkbox"
@@ -978,7 +1018,9 @@ function LoopOutEditor({
               ))
             ) : (
               <div className="column-empty">
-                Connect and run parent node to inspect columns.
+                {outputColumns.length
+                  ? "All output columns have stop conditions."
+                  : "Run this node to inspect output columns."}
               </div>
             )}
           </div>
@@ -1008,6 +1050,7 @@ function LoopOutEditor({
             <span>Column</span>
             <span>Operator</span>
             <span>Value</span>
+            <span />
           </div>
           <div className="loop-stop-condition-list">
             {stopConditions.length ? (
@@ -1020,7 +1063,7 @@ function LoopOutEditor({
                   }`}
                   key={`${condition.column}-${index}`}
                   onClick={(event) => {
-                    if (event.target.closest("input, select")) return;
+                    if (event.target.closest("input, select, button")) return;
                     toggleConditionColumn(condition.column);
                   }}
                   title="Select this condition to remove it with <<"
@@ -1050,6 +1093,13 @@ function LoopOutEditor({
                       updateStopCondition(index, { value: event.target.value })
                     }
                   />
+                  <button
+                    type="button"
+                    className="row-delete-button"
+                    onClick={() => removeCondition(index)}
+                  >
+                    Delete
+                  </button>
                 </div>
               ))
             ) : (
@@ -1064,6 +1114,23 @@ function LoopOutEditor({
           Max Iterations and Stop Conditions are available only in All rows mode.
         </div>
       )}
+        </div>
+        <aside className="column-side-panel">
+          <div className="column-title">Output Columns</div>
+          <div className="column-list">
+            {outputColumns.length ? (
+              outputColumns.map((column) => (
+                <div className="column-row" key={`${column.name}-${column.type}`}>
+                  <span className="column-name">{column.name}</span>
+                  <span className="column-type">{column.type}</span>
+                </div>
+              ))
+            ) : (
+              <div className="column-empty">Run this node to inspect output columns.</div>
+            )}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
@@ -1076,6 +1143,7 @@ function EditorPanel({
   inputDataframes,
   outputColumns,
   outputMessage,
+  outputError,
   loopIterationMode,
   apiBaseUrl,
   globalVariables,
@@ -1145,6 +1213,7 @@ function EditorPanel({
               inputDataframes={inputDataframes}
               outputColumns={outputColumns}
               outputMessage={outputMessage}
+              outputError={outputError}
               apiBaseUrl={apiBaseUrl}
               globalVariables={globalVariables}
               inputVariables={inputVariables}
@@ -1218,11 +1287,7 @@ function EditorPanel({
               editData={editData}
               setEditData={setEditData}
               iterationMode={loopIterationMode}
-              inputColumns={
-                inputDataframes.find((input) => input.columns.length)?.columns ||
-                outputColumns ||
-                []
-              }
+              outputColumns={outputColumns || []}
             />
           )}
           {selectedNode.type === "text" && (
@@ -1994,14 +2059,26 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
     const body = await response.json();
     return {
-      nodes: targetNodes.map((node) => ({
-        ...node,
-        data: {
+      nodes: targetNodes.map((node) => {
+        const inferredColumns = body.nodeColumns?.[node.id] || [];
+        const schemaError = body.errors?.[node.id] || undefined;
+        const nextData = {
           ...node.data,
-          outputColumns: body.nodeColumns?.[node.id] || node.data?.outputColumns || [],
-          schemaError: body.errors?.[node.id] || undefined,
-        },
-      })),
+          outputColumns: inferredColumns.length
+            ? inferredColumns
+            : node.data?.outputColumns || [],
+          schemaError,
+        };
+        if (node.type === "dbRead") {
+          if (schemaError) {
+            delete nextData.dbReadSchema;
+            nextData.outputColumns = [];
+          } else {
+            nextData.dbReadSchema = { columns: inferredColumns };
+          }
+        }
+        return { ...node, data: nextData };
+      }),
       edges: targetEdges.map((edge) => ({
         ...edge,
         data: {
@@ -2346,6 +2423,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
                     type: "unknown",
                   }))
                 : node.data.outputColumns;
+          const dbReadSchema =
+            node.type === "dbRead"
+              ? result?.dbReadSchema || nodeRun?.dbReadSchema || node.data.dbReadSchema
+              : undefined;
 
           return {
             ...node,
@@ -2353,6 +2434,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
               ...node.data,
               status: nodeRun?.status || node.data.status,
               outputColumns,
+              ...(node.type === "dbRead" && dbReadSchema ? { dbReadSchema } : {}),
               runRows:
                 nodeRun?.rows ??
                 (result?.kind === "dataframe"
@@ -2654,6 +2736,18 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       }
 
       if (event.key === "Escape") {
+        if (runCacheSelection) {
+          event.preventDefault();
+          event.stopPropagation();
+          setRunCacheSelection(null);
+          return;
+        }
+        if (isReplayDialogOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsReplayDialogOpen(false);
+          return;
+        }
         if (document.querySelector(".concert-picker")) {
           return;
         }
@@ -2699,6 +2793,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     openConcertLocal,
     pasteGraph,
     redo,
+    isReplayDialogOpen,
+    runCacheSelection,
     saveConcertLocal,
     selectedNode,
     showError,
@@ -2800,7 +2896,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           if (resultColumns.length) return resultColumns;
       }
 
-        const nodeColumns = normalizeColumnMetadata(node?.data?.outputColumns || []);
+        const nodeColumns = normalizeColumnMetadata(
+          node?.data?.outputColumns || node?.data?.dbReadSchema?.columns || [],
+        );
         if (nodeColumns.length) return nodeColumns;
         if (node?.type === "cacheRead") continue;
 
@@ -2880,7 +2978,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return selectedInputDataframes[0]?.columns || [];
     }
     return normalizeColumnMetadata(
-      editData?.outputColumns || selectedNode.data?.outputColumns || [],
+      editData?.outputColumns ||
+        selectedNode.data?.outputColumns ||
+        selectedNode.data?.dbReadSchema?.columns ||
+        [],
     );
   }, [editData, run, selectedInputDataframes, selectedNode]);
 
@@ -2894,6 +2995,11 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return "Connect an input DataFrame to inspect columns.";
     return "";
   }, [selectedNode, selectedOutputColumns.length]);
+
+  const selectedOutputError = useMemo(() => {
+    if (selectedNode?.type !== "dbRead") return "";
+    return editData?.schemaError || selectedNode.data?.schemaError || "";
+  }, [editData?.schemaError, selectedNode]);
 
   const onConnect = useCallback(
     (params) => {
@@ -3350,18 +3456,24 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         return;
       }
     }
-    const nextNodes = nodes.map((node) =>
-        node.id === selectedNode.id
-          ? {
-              ...node,
-              data: {
-                ...node.data,
-                ...nextEditData,
-                name: nodeName,
-              },
-            }
-          : node,
-      );
+    const nextNodes = nodes.map((node) => {
+      if (node.id !== selectedNode.id) return node;
+      const nextData = {
+        ...node.data,
+        ...nextEditData,
+        name: nodeName,
+      };
+      if (
+        selectedNode.type === "dbRead" &&
+        String(nextEditData.sql || "") !== String(node.data?.sql || "")
+      ) {
+        delete nextData.dbReadSchema;
+      }
+      if (selectedNode.type === "dbRead" && nextEditData.dbReadSchema === null) {
+        delete nextData.dbReadSchema;
+      }
+      return { ...node, data: nextData };
+    });
     const nextEdges = edges;
     const changed = hasChanges;
     if (changed) {
@@ -3385,8 +3497,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         graphRef.current = { nodes: inferred.nodes, edges: inferred.edges };
         setNodes(inferred.nodes);
         setEdges(inferred.edges);
-      } catch (error) {
-        setRun({ status: "error", nodes: {}, error: error.message });
+      } catch {
+        // Schema inference is best-effort and must not block or report node editing.
       }
     }
   };
@@ -4294,6 +4406,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         inputDataframes={selectedInputDataframes}
         outputColumns={selectedOutputColumns}
         outputMessage={selectedOutputMessage}
+        outputError={selectedOutputError}
         loopIterationMode={selectedLoopIterationMode}
         apiBaseUrl={apiBaseUrl}
         globalVariables={globalVariables}
@@ -4384,6 +4497,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           onOpen={() => setIsReplayDialogOpen(false)}
           onCacheOpen={openReplayCache}
           onClearCache={clearReplayCache}
+          escapeEnabled={!runCacheSelection}
         />
       )}
       {runCacheSelection && (

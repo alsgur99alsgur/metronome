@@ -393,6 +393,8 @@ def _run_response(run_state, include_data=False):
         result = node.get("result")
         if isinstance(result, dict) and result.get("kind") == "dataframe":
             next_node["rows"] = result.get("rows")
+            if result.get("dbReadSchema") is not None:
+                next_node["dbReadSchema"] = result["dbReadSchema"]
         return next_node
 
     response = {
@@ -794,6 +796,9 @@ def _watch_concert_process(run_id, process, event_queue):
                     node["loopIterations"] = event.get("loopIterations")
                     if event.get("result") is not None:
                         node["result"] = event["result"]
+                        schema = event["result"].get("dbReadSchema")
+                        if schema is not None and node.get("dbReadSchema") is None:
+                            node["dbReadSchema"] = schema
                     node["updatedAt"] = _now()
             elif kind in {"finished", "failed"}:
                 if run_state["status"] != "canceled":

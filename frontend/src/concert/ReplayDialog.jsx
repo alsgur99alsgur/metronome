@@ -163,6 +163,7 @@ export default function ReplayDialog({
   onOpen,
   onCacheOpen,
   onClearCache,
+  escapeEnabled = true,
 }) {
   const dialogRef = useRef(null);
   const [draftReplayId, setDraftReplayId] = useState(selectedReplayId || "");
@@ -201,6 +202,18 @@ export default function ReplayDialog({
   useEffect(() => {
     dialogRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (!escapeEnabled) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => window.removeEventListener("keydown", closeOnEscape, true);
+  }, [escapeEnabled, onClose]);
 
   useEffect(() => {
     const nextState = collapsedTreeState(tree, draftReplayId);
@@ -273,11 +286,7 @@ export default function ReplayDialog({
   };
 
   const onKeyDown = (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
+    if (event.key === "Escape") return;
     if (event.target.closest?.("select")) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();

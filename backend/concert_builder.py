@@ -253,14 +253,25 @@ def _build_db_read_task(task_id, name, data, params):
     source_sql = data.get("sql", "")
     dataframe_bind_names = bind_names_from_sql(source_sql)
     sql = _rewrite_sql_variables(source_sql)
+    saved_contract = data.get("dbReadSchema") or {}
+    fallback_columns = saved_contract.get("columns") or []
 
     def db_read(inputs):
         print(f"QUERY {name}")
         connection = _resolve_connection(data.get("connection", ""), params)
         bind_records = _bind_records_from_inputs(inputs, params, dataframe_bind_names)
-        result = execute_oracle_query_records(connection, sql, bind_records)
+        result = execute_oracle_query_records(
+            connection,
+            sql,
+            bind_records,
+            fallback_columns=fallback_columns,
+        )
         if result.attrs.get("pm_fallback"):
-            print(f"PM SKIP {name}: Oracle connection failed; using cached empty schema.")
+            print(f"PM SKIP {name}: Oracle connection failed; using saved output columns.")
+        elif result.attrs.get("oracle_columns") is not None:
+            result.attrs["db_read_schema"] = {
+                "columns": result.attrs["oracle_columns"],
+            }
         return result
 
     return Task(task_id, name, "dbRead", db_read)

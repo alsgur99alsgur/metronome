@@ -13,7 +13,7 @@ from oracle_client import describe_oracle_query
 
 
 def _columns_from_data(data):
-    columns = data.get("outputColumns") or []
+    columns = data.get("outputColumns") or (data.get("dbReadSchema") or {}).get("columns") or []
     return [column for column in columns if isinstance(column, dict) and column.get("name")]
 
 

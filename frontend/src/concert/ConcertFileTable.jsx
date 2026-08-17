@@ -31,7 +31,7 @@ export function ConcertFileTable({ concerts, directory, onOpen, openKinds = ["pl
           {item.kind === "rehearsal" && onPromote && <button className="primary-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onPromote(item); }}>Promote</button>}
           {item.kind === "backup" && onRollback && <button className="danger-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onRollback(item); }}>Rollback</button>}
           {item.kind === "playing" && onMove && <button disabled={busy || !canMove?.(item)} onClick={(event) => { event.stopPropagation(); onMove(item); }}>Move Folder</button>}
-          {onDelete && <button className="danger-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onDelete(item); }}>Delete</button>}
+          {onDelete && <button className="row-delete-button" disabled={busy} onClick={(event) => { event.stopPropagation(); onDelete(item); }}>Delete</button>}
         </span>}
       </div>
     );

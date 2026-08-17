@@ -306,16 +306,16 @@ function GridSection({ title, actionLabel, onAdd, secondaryActionLabel, onSecond
   );
 }
 
-function RemoveButton({ onClick }) {
+function DeleteButton({ onClick }) {
   return (
     <button
       type="button"
-      className="opl-remove-button"
+      className="row-delete-button"
       onClick={onClick}
-      title="Remove row"
-      aria-label="Remove row"
+      title="Delete row"
+      aria-label="Delete row"
     >
-      ×
+      Delete
     </button>
   );
 }
@@ -503,7 +503,7 @@ export default function OplEditor({ editData, setEditData, inputDataframes }) {
                   <td><input value={row.name || ""} onChange={(event) => renameSet(row, event.target.value)} /></td>
                   <td><InputSelect value={row.inputNodeId} inputs={inputDataframes} onChange={(inputNodeId) => setRows("sets", (rows) => updateRow(rows, row.id, { inputNodeId, column: "" }))} /></td>
                   <td><ColumnInput value={row.column} inputNodeId={row.inputNodeId} inputs={inputDataframes} onChange={(column) => setRows("sets", (rows) => updateRow(rows, row.id, { column }))} /></td>
-                  <td><RemoveButton onClick={() => removeSet(row)} /></td>
+                  <td><DeleteButton onClick={() => removeSet(row)} /></td>
                 </tr>
               ))}
             </tbody>
@@ -526,7 +526,7 @@ export default function OplEditor({ editData, setEditData, inputDataframes }) {
                   <td><InputSelect value={row.inputNodeId} inputs={inputDataframes} onChange={(inputNodeId) => setRows("params", (rows) => updateRow(rows, row.id, { inputNodeId, column: "" }))} /></td>
                   <td><ColumnInput value={row.column} inputNodeId={row.inputNodeId} inputs={inputDataframes} onChange={(column) => setRows("params", (rows) => updateRow(rows, row.id, { column }))} /></td>
                   <td><SetChecklist value={row.indexSets} sets={sets} onChange={(indexSets) => setRows("params", (rows) => updateRow(rows, row.id, { indexSets }))} /></td>
-                  <td><RemoveButton onClick={() => setRows("params", (rows) => rows.filter((item) => item.id !== row.id))} /></td>
+                  <td><DeleteButton onClick={() => setRows("params", (rows) => rows.filter((item) => item.id !== row.id))} /></td>
                 </tr>
               ))}
             </tbody>
@@ -554,7 +554,7 @@ export default function OplEditor({ editData, setEditData, inputDataframes }) {
                     </select>
                   </td>
                   <td><SetChecklist value={row.indexSets} sets={sets} onChange={(indexSets) => setRows("variables", (rows) => updateRow(rows, row.id, { indexSets }))} /></td>
-                  <td><RemoveButton onClick={() => setRows("variables", (rows) => rows.filter((item) => item.id !== row.id))} /></td>
+                  <td><DeleteButton onClick={() => setRows("variables", (rows) => rows.filter((item) => item.id !== row.id))} /></td>
                 </tr>
               ))}
             </tbody>
@@ -588,7 +588,7 @@ export default function OplEditor({ editData, setEditData, inputDataframes }) {
                     />
                   </td>
                   <td><input value={row.description || ""} onChange={(event) => setRows("expressions", (rows) => updateRow(rows, row.id, { description: event.target.value }))} /></td>
-                  <td><RemoveButton onClick={() => setRows("expressions", (rows) => rows.filter((item) => item.id !== row.id))} /></td>
+                  <td><DeleteButton onClick={() => setRows("expressions", (rows) => rows.filter((item) => item.id !== row.id))} /></td>
                 </tr>
               ))}
             </tbody>

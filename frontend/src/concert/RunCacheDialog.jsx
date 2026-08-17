@@ -99,7 +99,7 @@ export default function RunCacheDialog({ replay, caches, onClose, onOpen, onDele
               <span title={cache.player || "-"}>{cache.player || "-"}</span>
               <button
                 type="button"
-                className="danger-button run-cache-delete"
+                className="row-delete-button run-cache-delete"
                 onDoubleClick={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();

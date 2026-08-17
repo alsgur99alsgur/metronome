@@ -63,7 +63,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 현재 창에�
 
 실행 후 아래 항목은 모두 `electron.exe`와 같은 디렉터리 트리에 생성된다.
 
-- `config.json`, `connections.json`, `connection_schema_cache.json`, `servers.json`, `timers.json`
+- `config.json`, `connections.json`, `servers.json`, `timers.json`
 - `playings`, `replay`, `stage`, `tmp`, `rehearsals`, `backups`
 
 업데이트하거나 폴더를 삭제하기 전에 이 디렉터리를 백업한다. 여러 사용자가 같은

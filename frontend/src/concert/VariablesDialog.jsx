@@ -151,13 +151,14 @@ export default function VariablesDialog({
                   placeholder="default"
                 />
                 <button
+                  className="row-delete-button"
                   onClick={() =>
                     setDraftInputVariables((current) =>
                       current.filter((_, itemIndex) => itemIndex !== index),
                     )
                   }
                 >
-                  Remove
+                  Delete
                 </button>
               </div>
               ))}
@@ -216,13 +217,14 @@ export default function VariablesDialog({
                   placeholder="value"
                 />
                 <button
+                  className="row-delete-button"
                   onClick={() =>
                     setDraftGlobalVariables((current) =>
                       current.filter((_, itemIndex) => itemIndex !== index),
                     )
                   }
                 >
-                  Remove
+                  Delete
                 </button>
               </div>
               ))}
