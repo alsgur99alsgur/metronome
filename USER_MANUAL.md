@@ -285,6 +285,149 @@ UI에서 최적화 모델을 구성하고 Pyomo 모델로 변환해 풀이한다
 
 Variable 타입은 NonNegative Real, NonNegative Integer, Binary를 지원한다. Constraint는 Name, Formula, Condition이 필요하며 Objective는 Condition을 사용하지 않는다.
 
+#### 목적식과 제약식 문법
+
+Formula와 Condition에는 UI에서 정의한 Set, Parameter, Variable의 **Name**을 그대로 사용한다. `model.` 접두사는 쓰지 않는다. 모든 이름은 영문자 또는 underscore로 시작하는 유효한 Python 식별자여야 한다.
+
+지원하는 기본 표현은 다음과 같다.
+
+| 종류 | 문법 예시 |
+|---|---|
+| 숫자 | `10`, `3.5` |
+| 사칙연산 | `revenue - cost`, `price * quantity`, `amount / 100` |
+| 거듭제곱 | `x ** 2` |
+| 괄호 | `(price - cost) * quantity` |
+| 비교 | `==`, `!=`, `>=`, `>`, `<=`, `<` |
+| 등호 | `=`도 제약식과 Condition에서 `==`로 변환된다. |
+| 합계 | `sum([SetName], expression)` |
+
+일반 Python의 `sum(expression for i in set)` 문법은 사용하지 않는다. OPL 전용 합계 문법은 반드시 다음 형태로 작성한다.
+
+```text
+sum([index_set_1, index_set_2], expression)
+```
+
+대괄호 안에는 UI의 **Sets** 영역에서 정의한 Set 이름을 넣는다.
+
+#### 단일 인덱스
+
+다음 구성 요소가 있다고 가정한다.
+
+- Set: `Products`
+- Parameter: `profit`, Indexes = `Products`
+- Variable: `make`, Indexes = `Products`
+
+제품별 이익의 합을 최대화하는 목적식은 다음과 같다.
+
+```text
+sum([Products], profit[Products] * make[Products])
+```
+
+여기서 대괄호 안의 `Products`는 입력 DataFrame의 컬럼명이 아니라 OPL에 등록한 **Set 이름**이다. 실행 시 Set에 포함된 각 실제 값으로 치환된다.
+
+#### 다중 인덱스
+
+다음 구성 요소가 있다고 가정한다.
+
+- Set: `Plants`
+- Set: `Products`
+- Parameter: `cost`, Indexes = `Plants, Products`
+- Variable: `ship`, Indexes = `Plants, Products`
+
+모든 공장과 제품 조합의 비용 합계는 다음과 같다.
+
+```text
+sum([Plants, Products], cost[Plants, Products] * ship[Plants, Products])
+```
+
+여러 Set을 `sum`에 넣으면 지정한 순서대로 중첩 순회한다. Parameter와 Variable의 인덱스 순서도 UI의 **Indexes**에서 선택한 순서와 일치시킨다.
+
+#### 제약식의 바깥 인덱스
+
+제약식에서는 `sum` 바깥의 대괄호에 사용한 Set이 해당 Constraint의 반복 인덱스로 자동 등록된다.
+
+공장별 출하량 제한 예시:
+
+```text
+sum([Products], ship[Plants, Products]) <= capacity[Plants]
+```
+
+이 식에서:
+
+- `Products`는 `sum` 내부에서 순회한다.
+- `Plants`는 `sum` 바깥에 남아 있으므로 Constraint가 공장별로 생성된다.
+- 각 공장에 대해 모든 제품의 `ship` 합계가 해당 공장의 `capacity` 이하인지 검사한다.
+
+제품별 수요 충족 제약 예시:
+
+```text
+sum([Plants], ship[Plants, Products]) >= demand[Products]
+```
+
+이 경우 `Products`가 바깥 인덱스이므로 제품별 Constraint가 생성된다.
+
+인덱스가 두 개 모두 바깥에 있으면 조합별 Constraint가 생성된다.
+
+```text
+ship[Plants, Products] <= route_limit[Plants, Products]
+```
+
+#### Condition 사용법
+
+Condition은 Constraint를 생성할 index 조합을 제한한다. Condition 결과가 참인 조합만 제약식을 만들고, 거짓인 조합은 건너뛴다.
+
+활성화된 공장에만 제약식을 적용하는 예시:
+
+```text
+Formula:   sum([Products], ship[Plants, Products]) <= capacity[Plants]
+Condition: enabled[Plants] == 1
+```
+
+모든 index 조합에 적용하려면 Condition에 다음과 같이 입력한다.
+
+```text
+True
+```
+
+Condition에만 등장한 Set도 Constraint의 바깥 반복 인덱스에 포함된다.
+
+#### Scalar Parameter와 Variable
+
+Indexes를 선택하지 않은 Parameter와 Variable은 대괄호 없이 사용한다.
+
+```text
+fixed_cost + unit_cost * total_quantity
+```
+
+Scalar Parameter는 연결된 입력 DataFrame의 첫 번째 행 값을 사용한다. 입력 DataFrame이 비어 있으면 오류가 발생한다.
+
+#### Sparse index 처리
+
+여러 Set을 사용하는 Variable은 선택한 Set들이 참조하는 동일한 입력 노드의 실제 index 조합만 생성한다. 입력에 존재하지 않는 조합은 자동 생성하지 않는다.
+
+- `sum` 안에서 존재하지 않는 sparse Parameter/Variable 조합은 해당 항을 `0`으로 처리한다.
+- Constraint에서 필요한 sparse key가 없으면 해당 index 조합의 Constraint를 건너뛴다.
+- 따라서 누락된 조합을 반드시 오류로 취급해야 하는 모델이라면 OPL 실행 전에 입력 데이터를 검증해야 한다.
+
+#### 문법 예제 모음
+
+| 목적 | Formula | Condition |
+|---|---|---|
+| 전체 이익 최대화 | `sum([Products], profit[Products] * make[Products])` | 목적식은 사용하지 않음 |
+| 공장별 생산능력 | `sum([Products], make[Plants, Products]) <= capacity[Plants]` | `True` |
+| 제품별 최소 수요 | `sum([Plants], ship[Plants, Products]) >= demand[Products]` | `demand[Products] > 0` |
+| 허용된 경로만 사용 | `ship[Plants, Products] <= route_limit[Plants, Products]` | `allowed[Plants, Products] == 1` |
+| Binary 연결 | `quantity[Products] <= max_quantity[Products] * selected[Products]` | `True` |
+
+#### 자주 발생하는 오류
+
+- `sum(Products, ...)`: index 목록에 대괄호가 없으므로 오류다.
+- `sum([i], ...)`: `i`라는 Set을 정의하지 않았다면 오류다. 임의의 index 별칭 대신 실제 Set 이름을 사용한다.
+- `make[product]`: Set 이름이 `Products`라면 `make[Products]`로 작성해야 한다.
+- `ship[Products, Plants]`: Variable의 Indexes 순서가 `Plants, Products`라면 순서를 반대로 쓰면 안 된다.
+- `sum([Products], make[Plants, Products])`를 목적식에 단독 사용: `Plants`가 합산되지 않은 자유 index로 남으므로 오류다. 목적식에서는 필요한 모든 index를 `sum`에 포함한다.
+- 정의하지 않은 Set, Parameter, Variable 이름 사용: 자동 생성하지 않고 실행 오류로 처리한다.
+
 **Options 탭**
 
 - Objective Sense: Maximize 또는 Minimize
