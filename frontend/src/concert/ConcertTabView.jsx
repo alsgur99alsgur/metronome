@@ -373,24 +373,11 @@ const getEditableSnapshot = (type, data = {}) => {
   return { name: data.name || "" };
 };
 
-const hasEditorChanges = (
-  node,
-  editData,
-  { ignoreAutomaticConnection = false } = {},
-) => {
+const hasEditorChanges = (node, editData) => {
   if (!node || !editData) return false;
-  const editSnapshot = getEditableSnapshot(node.type, editData);
-  if (
-    ignoreAutomaticConnection &&
-    ["dbRead", "dbWrite"].includes(node.type) &&
-    editData.connectionWasAutoSelected &&
-    !node.data?.connection
-  ) {
-    editSnapshot.connection = "";
-  }
   return (
     JSON.stringify(getEditableSnapshot(node.type, node.data)) !==
-    JSON.stringify(editSnapshot)
+    JSON.stringify(getEditableSnapshot(node.type, editData))
   );
 };
 
@@ -2688,12 +2675,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         if (isMonacoSuggestVisible()) {
           return;
         }
-        if (
-          selectedNode &&
-          hasEditorChanges(selectedNode, editData, {
-            ignoreAutomaticConnection: true,
-          })
-        ) {
+        if (selectedNode && hasEditorChanges(selectedNode, editData)) {
           event.preventDefault();
           event.stopPropagation();
           setIsSaveChangesDialogOpen(true);
@@ -3195,12 +3177,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [clearNodeSelection]);
 
   const requestEditorClose = useCallback(() => {
-    if (
-      selectedNode &&
-      hasEditorChanges(selectedNode, editData, {
-        ignoreAutomaticConnection: true,
-      })
-    ) {
+    if (selectedNode && hasEditorChanges(selectedNode, editData)) {
       setIsSaveChangesDialogOpen(true);
       return;
     }
@@ -3334,9 +3311,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
     const hasChanges = hasEditorChanges(selectedNode, editData);
     let nextEditData = editData;
-    if (["dbRead", "dbWrite"].includes(selectedNode.type)) {
-      nextEditData = omitKeys(editData, new Set(["connectionWasAutoSelected"]));
-    }
     if (selectedNode.type === "concert") {
       try {
         if (editData.concertInputsLoading) {
