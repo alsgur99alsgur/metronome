@@ -101,7 +101,7 @@ Input/Global 변수 편집 UI는 `string`, `number` 타입만 제공한다.
 로컬 Concert Open은 파일명과 payload 이름 일치를 요구하지 않고 version 및 노드 이름을 Open 시 검증하지 않는다. 서버의 Playing/Rehearsal/Backup Open은 Rehearsal 단계에서 검증된 파일을 신뢰하여 payload schema를 다시 검증하지 않는다.
 - `ConcertSearch.jsx`: node data/code/variable 검색과 결과 이동
 
-프런트는 `/runs/{runId}`를 polling한다. 실행 중에는 메인 프로세스 상태를, child 종료 후에는 Run Cache 또는 run-status fallback을 반환한다. User Run은 Replay와 Run Cache를 함께 만들고, Replay Run은 Run Cache만, Timer/Event Run은 Replay만 만든다.
+프런트는 `/runs/{runId}`를 polling한다. 실행 중에는 메인 프로세스 상태를, child 종료 후에는 Run Cache를 반환한다. Run Cache 생성 전 child가 조기 종료되면 404로 폴링을 종료한다. User Run은 Replay와 Run Cache를 함께 만들고, Replay Run은 Run Cache만, Timer/Event Run은 Replay만 만든다. Timer 실행 완료 상태는 run monitor가 TimerManager에 직접 전달한다.
 
 Loop 내부 결과가 저장된 노드는 컨텍스트 메뉴의 `View Iterations`에서 반복 key를 조회한다. 반복별 Data는 별도 DataViewer로 열고 OPL 노드는 반복별 LP도 열 수 있다.
 

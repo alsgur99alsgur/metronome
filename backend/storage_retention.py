@@ -8,9 +8,8 @@ from app_config import config_int
 
 
 class StorageRetentionManager:
-    def __init__(self, replay_root, run_status_root, stage_root, check_interval_seconds=300):
+    def __init__(self, replay_root, stage_root, check_interval_seconds=300):
         self.replay_root = os.path.abspath(replay_root)
-        self.run_status_root = os.path.abspath(run_status_root)
         self.stage_cache_root = os.path.join(os.path.abspath(stage_root), "cache")
         self.check_interval_seconds = check_interval_seconds
         self._stop = Event()
@@ -31,7 +30,6 @@ class StorageRetentionManager:
         deleted = {
             "replays": 0,
             "caches": 0,
-            "runStatuses": 0,
             "stageCacheVersions": 0,
             "stageCachePointers": 0,
             "temporaryFiles": 0,
@@ -85,15 +83,6 @@ class StorageRetentionManager:
                     os.rmdir(concert_path)
                 except OSError:
                     pass
-
-        if os.path.isdir(self.run_status_root):
-            for file_name in os.listdir(self.run_status_root):
-                if not file_name.endswith(".json"):
-                    continue
-                path = os.path.join(self.run_status_root, file_name)
-                if os.path.isfile(path) and self._expired(path, cutoff):
-                    os.unlink(path)
-                    deleted["runStatuses"] += 1
 
         if os.path.isdir(self.stage_cache_root):
             for file_name in os.listdir(self.stage_cache_root):

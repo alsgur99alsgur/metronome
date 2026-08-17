@@ -74,6 +74,7 @@ class Executor:
         self.loop_thread_semaphore = loop_thread_semaphore or BoundedSemaphore(
             max(1, self.workers)
         )
+        self.loop_snapshot_durations = {}
 
     def start(self):
         if self.started:
@@ -498,13 +499,23 @@ class Executor:
             raise
 
     def _execute_loop_iteration(self, task, iteration_df, loop_context, worker_id):
+        iteration_durations = {}
+        iteration_durations_lock = Lock()
+
+        def on_iteration_event(body_task, status, **event):
+            self.on_event(body_task, status, **event)
+            duration_ms = event.get("duration_ms")
+            if status in {"success", "error", "skipped"} and duration_ms is not None:
+                with iteration_durations_lock:
+                    iteration_durations[body_task.id] = duration_ms
+
         iteration_executor = Executor(
             self.replay_data_store,
             cache_data_store=self.cache_data_store,
             replay=self.replay,
             workers=self.workers,
             timeout=self.timeout,
-            on_event=self.on_event,
+            on_event=on_iteration_event,
             runnable_task_ids=self.runnable_task_ids,
             cancel_event=self.cancel_event,
             save_loop_snapshots=False,
@@ -561,16 +572,26 @@ class Executor:
                     completed.add(body_task.id)
                     pending.pop(body_task.id, None)
 
+        iteration_durations.update(iteration_executor.loop_snapshot_durations)
         return (
             iteration_executor.results.get(task.loop_out_task.id, pd.DataFrame()),
             iteration_executor.results,
+            iteration_durations,
         )
 
-    def _save_last_loop_snapshot(self, task, snapshot, worker_id, parent_result):
+    def _save_last_loop_snapshot(
+        self,
+        task,
+        snapshot,
+        snapshot_durations,
+        worker_id,
+        parent_result,
+    ):
         self._save_cache_event(
             task,
             "success",
             result=parent_result,
+            duration_ms=snapshot_durations.get(task.id),
             logs="Saved the Loop In parent result from the outermost loop's last iteration.",
             worker_id=worker_id,
         )
@@ -594,6 +615,7 @@ class Executor:
                 body_task,
                 "success",
                 result=result,
+                duration_ms=snapshot_durations.get(body_task.id),
                 logs="Saved from the outermost loop's last iteration.",
                 worker_id=worker_id,
             )
@@ -635,13 +657,14 @@ class Executor:
             fd, output_path = tempfile.mkstemp(prefix="metronome-loop-", suffix=".parquet")
             os.close(fd)
         last_snapshot = None
+        last_snapshot_durations = None
         try:
             if mode == "allRows":
                 while index <= max_iterations and next_iteration_df is not None:
                     if self.cancel_event.is_set():
                         break
                     current_context = [*loop_context, index]
-                    result, last_snapshot = self._execute_loop_iteration(
+                    result, last_snapshot, last_snapshot_durations = self._execute_loop_iteration(
                         task,
                         next_iteration_df,
                         current_context,
@@ -689,7 +712,7 @@ class Executor:
                             for future in as_completed(futures)
                         }
                         for iteration_index, _ in batch:
-                            result, snapshot = iteration_results[iteration_index]
+                            result, snapshot, snapshot_durations = iteration_results[iteration_index]
                             completed_iterations += 1
                             if isinstance(result, pd.DataFrame):
                                 last_result = result
@@ -700,6 +723,7 @@ class Executor:
                                     output_schema,
                                 )
                             last_snapshot = snapshot
+                            last_snapshot_durations = snapshot_durations
                             logs.append(
                                 f"iteration {self._loop_key([*loop_context, iteration_index])}"
                             )
@@ -729,10 +753,12 @@ class Executor:
             with self.lock:
                 self.results.update(last_snapshot)
                 self.results[task.id] = loop_parent_result
+                self.loop_snapshot_durations.update(last_snapshot_durations or {})
         if self.save_loop_snapshots and last_snapshot is not None:
             self._save_last_loop_snapshot(
                 task,
                 last_snapshot,
+                last_snapshot_durations or {},
                 worker_id,
                 loop_parent_result,
             )

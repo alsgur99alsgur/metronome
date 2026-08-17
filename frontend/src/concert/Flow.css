@@ -1550,6 +1550,19 @@ pre {
   font-weight: 700;
 }
 
+.running-limits {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.running-limits strong {
+  margin-left: 5px;
+  color: #0f172a;
+}
+
 .running-dialog.error {
   border-color: #fecaca;
 }

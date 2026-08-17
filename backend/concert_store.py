@@ -120,6 +120,28 @@ class ConcertStore:
     def load_by_id(self, concert_id):
         return self.load(self.name_for_id(concert_id))
 
+    def name_for_basename(self, name):
+        basename = self.safe_name(name)
+        matches = []
+        target_file = f"{basename}.concert"
+        for root, folders, files in os.walk(self.path):
+            folders[:] = [folder for folder in folders if not folder.startswith(".")]
+            if target_file in files:
+                path = os.path.join(root, target_file)
+                matches.append(
+                    os.path.relpath(path, self.path).replace(os.sep, "/")[:-8]
+                )
+        if not matches:
+            raise FileNotFoundError(f"Concert not found: {basename}")
+        if len(matches) > 1:
+            raise ValueError(
+                f"Multiple Playing Concerts have the same filename: {basename}"
+            )
+        return matches[0]
+
+    def load_by_basename(self, name):
+        return self.load(self.name_for_basename(name))
+
     @staticmethod
     def _clean_node_for_save(node):
         data = dict(node["data"])

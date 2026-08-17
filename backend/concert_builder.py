@@ -453,17 +453,12 @@ def _build_concert_call_task(
     resource_store,
     run_id,
 ):
-    concert_id = data.get("concertId", "")
     concert_name = data.get("concertName", "")
     input_params = _parse_mapping(data.get("inputParams", {}))
 
     def concert_call(inputs):
-        if not concert_id:
+        if not concert_name:
             raise ValueError("Concert call node has no Concert selected.")
-        if concert_id in call_ids:
-            raise RecursionError(
-                f"Concert self-call is not allowed: {' -> '.join(call_stack + [concert_name])}"
-            )
         if len(call_stack) >= MAX_CONCERT_CALL_DEPTH:
             raise RecursionError(
                 f"Concert call depth exceeded: {' -> '.join(call_stack + [concert_name])}"
@@ -473,8 +468,13 @@ def _build_concert_call_task(
         from replay_data_store import ReplayDataStore
 
         concert_store = ConcertStore(concert_root)
-        concert = concert_store.load_by_id(concert_id)
+        concert = concert_store.load_by_basename(concert_name)
         resolved_concert_name = concert["name"]
+        resolved_concert_id = ConcertStore.validate_id(concert.get("concertId"))
+        if resolved_concert_id in call_ids:
+            raise RecursionError(
+                f"Concert self-call is not allowed: {' -> '.join(call_stack + [resolved_concert_name])}"
+            )
         resolved_input_params = _resolve_mapping_variable_references(input_params, params)
         called_input_variables = concert["inputVariables"]
         sub_params = _runtime_params(
@@ -519,7 +519,7 @@ def _build_concert_call_task(
             concert_root=concert_root,
             replay_root=replay_root,
             call_stack=call_stack + [resolved_concert_name],
-            call_ids=call_ids + [concert_id],
+            call_ids=call_ids + [resolved_concert_id],
             caller_input_params=called_params,
             resource_store=resource_store,
             run_id=run_id,

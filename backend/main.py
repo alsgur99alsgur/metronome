@@ -19,8 +19,10 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from cache_data_store import CacheDataStore
+from app_config import config_int
 from concert_builder import selected_concert_graph
 from concert_store import ConcertStore
+from node_run_validation import validate_run_nodes, validation_message
 from deployment_store import DeploymentMismatchError, DeploymentStore
 from oracle_client import (
     OracleUnavailable,
@@ -49,7 +51,6 @@ STAGE_ROOT = os.path.join(BACKEND_ROOT, "stage")
 TMP_ROOT = os.path.join(BACKEND_ROOT, "tmp")
 SERVERS_PATH = os.path.join(BACKEND_ROOT, "servers.json")
 TIMERS_PATH = os.path.join(BACKEND_ROOT, "timers.json")
-RUN_STATUS_ROOT = os.path.join(BACKEND_ROOT, "run-status")
 EXECUTOR_ID = socket.gethostname()
 
 
@@ -342,11 +343,9 @@ timer_manager = TimerManager(
         trigger="timer",
         cache_enabled=False,
     ),
-    status_callback=lambda run_id: _timer_run_state(run_id),
 )
 retention_manager = StorageRetentionManager(
     REPLAY_ROOT,
-    RUN_STATUS_ROOT,
     STAGE_ROOT,
 )
 
@@ -386,60 +385,6 @@ def _run_timestamp():
 
 def _now():
     return datetime.utcnow().isoformat() + "Z"
-
-
-def _run_status_path(run_id):
-    safe_run_id = str(run_id or "")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_run_id):
-        raise ValueError(f"Invalid runId: {run_id}")
-    return os.path.join(RUN_STATUS_ROOT, f"{safe_run_id}.json")
-
-
-def _write_run_status(run_state):
-    os.makedirs(RUN_STATUS_ROOT, exist_ok=True)
-    node_errors = [
-        node.get("error")
-        for node in run_state.get("nodes", {}).values()
-        if node.get("error")
-    ]
-    payload = {
-        "id": run_state["id"],
-        "concertName": run_state["concertName"],
-        "status": run_state["status"],
-        "createdAt": run_state.get("createdAt"),
-        "updatedAt": run_state.get("updatedAt"),
-        "finishedAt": run_state.get("finishedAt"),
-        "timing": run_state.get("timing"),
-        "trigger": run_state.get("trigger"),
-        "error": node_errors[0] if node_errors else None,
-        "nodes": {
-            node_id: {key: value for key, value in node.items() if key != "result"}
-            for node_id, node in run_state.get("nodes", {}).items()
-        },
-        "cache": run_state.get("cache"),
-        "replay": run_state.get("replay"),
-    }
-    fd, temporary = tempfile.mkstemp(
-        prefix=f".{run_state['id']}.",
-        suffix=".tmp",
-        dir=RUN_STATUS_ROOT,
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            json.dump(payload, file, ensure_ascii=False, indent=2)
-            file.write("\n")
-        os.replace(temporary, _run_status_path(run_state["id"]))
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def _load_run_status(run_id):
-    path = _run_status_path(run_id)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"Run status not found: {run_id}")
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
 
 
 def _run_response(run_state, include_data=False):
@@ -490,6 +435,16 @@ def get_playing_by_id(concert_id: str):
         return concert_store.load_by_id(concert_id)
     except (ValueError, FileNotFoundError) as exc:
         raise _deployment_error(exc) from exc
+
+
+@app.get("/playings-by-name/{concert_name}")
+def get_playing_by_name(concert_name: str):
+    try:
+        return concert_store.load_by_basename(concert_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/playings")
@@ -824,6 +779,8 @@ def _watch_concert_process(run_id, process, event_queue):
             if kind == "started":
                 run_state["status"] = "running"
                 run_state["executor"]["pid"] = event.get("pid")
+                if event.get("execution"):
+                    run_state["execution"] = event["execution"]
                 run_state["cache"]["cacheId"] = event.get("cacheId")
                 run_state["replay"]["outputReplayId"] = event.get("replayId")
             elif kind == "node":
@@ -854,13 +811,26 @@ def _watch_concert_process(run_id, process, event_queue):
     # The terminal message is emitted before child-side Executor/Oracle cleanup.
     # Keep the handle registered until the process has actually exited.
     process.join()
+    completed_state = None
     with runs_lock:
         run_state = runs.get(run_id)
         if run_state is not None:
-            _write_run_status(run_state)
+            completed_state = _run_response(run_state, include_data=False)
         execution_processes.pop(run_id, None)
         execution_cancel_events.pop(run_id, None)
         runs.pop(run_id, None)
+    if completed_state is not None and completed_state.get("trigger") == "timer":
+        node_error = next(
+            (
+                node.get("error")
+                for node in completed_state.get("nodes", {}).values()
+                if node.get("error")
+            ),
+            None,
+        )
+        if not completed_state.get("error") and node_error:
+            completed_state["error"] = node_error
+        timer_manager.complete_run(run_id, completed_state)
     event_queue.close()
     event_queue.join_thread()
 
@@ -884,7 +854,8 @@ def _queue_run(
     del cache_enabled
     concert_name = ConcertStore.safe_path_name(concert_name)
     concert_id = ConcertStore.validate_id(concert_id)
-    ConcertStore.validate_nodes(nodes)
+    if not isinstance(nodes, list):
+        raise ValueError("Concert nodes must be an array.")
     if not isinstance(edges, list):
         raise ValueError("Concert edges must be an array.")
     if not isinstance(global_variables, list):
@@ -903,19 +874,31 @@ def _queue_run(
         raise HTTPException(status_code=400, detail="replayId is required for replay runs")
     if mode not in {"all", "selected"}:
         raise HTTPException(status_code=400, detail=f"Invalid run mode: {mode}")
-    input_values = dict(params or {})
-    run_timestamp = _run_timestamp()
-    run_id = f"{concert_name}_{run_timestamp}"
-    selected_node_ids = {
-        node["id"] for node in concert["nodes"] if node.get("type") != "text"
-    }
+    selected_nodes = [
+        node for node in concert["nodes"] if node.get("type") != "text"
+    ]
     if mode == "selected":
         selected_nodes, _selected_edges = selected_concert_graph(
-            [node for node in concert["nodes"] if node.get("type") != "text"],
+            selected_nodes,
             concert["edges"],
             selected,
         )
-        selected_node_ids = {node["id"] for node in selected_nodes}
+    if trigger == "manual":
+        validation_errors = validate_run_nodes(selected_nodes, concert["edges"])
+        if validation_errors:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "INVALID_RUN_NODES",
+                    "message": validation_message(validation_errors),
+                    "nodes": validation_errors,
+                },
+            )
+    ConcertStore.validate_nodes(nodes)
+    input_values = dict(params or {})
+    run_timestamp = _run_timestamp()
+    run_id = f"{concert_name}_{run_timestamp}"
+    selected_node_ids = {node["id"] for node in selected_nodes}
     node_states = {
         node["id"]: {
             "id": node["id"], "name": node["data"]["name"], "type": node.get("type", ""),
@@ -927,6 +910,10 @@ def _queue_run(
         for node in concert["nodes"] if node.get("type") != "text"
     }
     source_metadata = _run_source_metadata(trigger, request)
+    execution_settings = {
+        "workers": config_int("executor", "workers"),
+        "oraclePoolMax": config_int("oracle", "poolMax"),
+    }
     mp_context = multiprocessing.get_context("spawn")
     event_queue = mp_context.Queue()
     cancel_event = mp_context.Event()
@@ -934,6 +921,7 @@ def _queue_run(
         "runId": run_id, "trigger": trigger, "mode": mode, "selected": selected,
         "replay": replay, "replayId": replay_id, "runTimestamp": run_timestamp,
         "sourceMetadata": source_metadata,
+        "executionSettings": execution_settings,
         "playingRoot": PLAYING_ROOT, "replayRoot": REPLAY_ROOT, "stageRoot": STAGE_ROOT,
     }
     process = ConcertRunProcess(
@@ -947,16 +935,18 @@ def _queue_run(
         runs[run_id] = {
             "id": run_id, "concertName": concert_name, "status": "queued", "nodes": node_states,
             "createdAt": _now(), "updatedAt": _now(), "finishedAt": None,
-            "timing": {"totalElapsedMs": 0, "buildConcertMs": 0, "executionMs": 0, "replaySaveMs": 0, "cacheSaveMs": 0},
+            "timing": {"totalElapsedMs": 0, "processCreateMs": 0, "oraclePoolInitMs": 0, "buildConcertMs": 0, "executionMs": 0, "replaySaveMs": 0, "cacheSaveMs": 0},
             "trigger": trigger, **source_metadata, "params": input_values,
             "globalVariables": concert.get("globalVariables") or [], "inputVariables": concert.get("inputVariables") or [],
             "executor": {"id": EXECUTOR_ID, "pid": None, "replayRoot": os.path.abspath(REPLAY_ROOT)},
+            "execution": execution_settings,
             "replay": {"enabled": replay, "selectedReplayId": replay_id, "outputReplayId": None},
             "cache": {"enabled": trigger == "manual", "cacheId": None},
         }
         execution_processes[run_id] = process
         execution_cancel_events[run_id] = cancel_event
     try:
+        context["processStartRequestedAt"] = time.time()
         process.start()
     except Exception:
         with runs_lock:
@@ -975,6 +965,7 @@ def _queue_run(
         "runId": run_id, "status": "queued", "nodes": node_states,
         "replayId": None, "cacheId": None,
         "executorId": EXECUTOR_ID, "replayRoot": os.path.abspath(REPLAY_ROOT),
+        "execution": execution_settings,
     }
 
 
@@ -1019,13 +1010,6 @@ def save_timers(req: TimerBatchRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _timer_run_state(run_id):
-    with runs_lock:
-        if run_id in runs:
-            return runs[run_id]
-    return _load_run_status(run_id)
-
-
 @app.post("/events/trigger")
 def event_trigger(req: EventRunRequest, request: Request):
     try:
@@ -1056,11 +1040,8 @@ def get_run(
             run_id,
             concert_name=concertName,
         )
-    except FileNotFoundError:
-        try:
-            return _load_run_status(run_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="run not found") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
 
 
 @app.get("/runs/{run_id}/nodes/{node_id}/data")

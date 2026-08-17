@@ -49,6 +49,7 @@ import SaveChangesDialog from "./SaveChangesDialog";
 import VariablesDialog from "./VariablesDialog";
 import { coerceVariableValue } from "./variableTypes";
 import { nodeTypes } from "./nodeTypes";
+import { runTargetNodes, runValidationMessage, validateRunNodes } from "./nodeRunValidation";
 import { concertBaseName, validateCacheName, validateConcertName, validateConcertPath, validateNodeName } from "./nameValidation";
 import { useErrorDialog } from "../errors/ErrorDialog";
 
@@ -372,11 +373,24 @@ const getEditableSnapshot = (type, data = {}) => {
   return { name: data.name || "" };
 };
 
-const hasEditorChanges = (node, editData) => {
+const hasEditorChanges = (
+  node,
+  editData,
+  { ignoreAutomaticConnection = false } = {},
+) => {
   if (!node || !editData) return false;
+  const editSnapshot = getEditableSnapshot(node.type, editData);
+  if (
+    ignoreAutomaticConnection &&
+    ["dbRead", "dbWrite"].includes(node.type) &&
+    editData.connectionWasAutoSelected &&
+    !node.data?.connection
+  ) {
+    editSnapshot.connection = "";
+  }
   return (
     JSON.stringify(getEditableSnapshot(node.type, node.data)) !==
-    JSON.stringify(getEditableSnapshot(node.type, editData))
+    JSON.stringify(editSnapshot)
   );
 };
 
@@ -1293,6 +1307,8 @@ const formatDurationMs = (value) => {
 
 function RunCompleteDialog({ timing, onClose }) {
   const totalElapsedMs = timing?.totalElapsedMs ?? 0;
+  const processCreateMs = timing?.processCreateMs ?? 0;
+  const oraclePoolInitMs = timing?.oraclePoolInitMs ?? 0;
   const buildConcertMs = timing?.buildConcertMs ?? 0;
   const replaySaveMs = timing?.replaySaveMs ?? 0;
   const executionMs =
@@ -1314,6 +1330,14 @@ function RunCompleteDialog({ timing, onClose }) {
           <div>
             <span>Total elapsed</span>
             <strong>{formatDurationMs(totalElapsedMs)}</strong>
+          </div>
+          <div>
+            <span>Process startup</span>
+            <strong>{formatDurationMs(processCreateMs)}</strong>
+          </div>
+          <div>
+            <span>Oracle pool initialization</span>
+            <strong>{formatDurationMs(oraclePoolInitMs)}</strong>
           </div>
           <div>
             <span>Concert build</span>
@@ -2016,20 +2040,20 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [inferConcertColumns]);
 
   const validateCalledConcerts = async (targetNodes) => {
-    const concertIds = [
+    const concertNames = [
       ...new Set(
         targetNodes
           .filter((node) => node.type === "concert")
-          .map((node) => node.data?.concertId || "")
+          .map((node) => node.data?.concertName || "")
           .filter(Boolean),
       ),
     ];
 
-    for (const targetConcertId of concertIds) {
-      const response = await fetch(`${apiBaseUrl}/playings-by-id/${encodeURIComponent(targetConcertId)}`);
+    for (const targetConcertName of concertNames) {
+      const response = await fetch(`${apiBaseUrl}/playings-by-name/${encodeURIComponent(targetConcertName)}`);
       if (response.ok) continue;
       if (response.status === 404) {
-        throw new Error(`Called Concert not found in backend: ${targetConcertId}`);
+        throw new Error(`Called Concert not found in backend: ${targetConcertName}`);
       }
       throw new Error(`Load called Concert failed: ${await response.text()}`);
     }
@@ -2116,8 +2140,10 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     if (pending) return pending;
     const operation = (async () => {
       setOpeningConcertName(concertBaseName(name));
-      const path = name.split("/").map(encodeURIComponent).join("/");
-      const response = await fetch(`${apiBaseUrl}/playings/${path}`);
+      const lookupPath = concertIdOverride
+        ? `/playings-by-id/${encodeURIComponent(concertIdOverride)}`
+        : `/playings-by-name/${encodeURIComponent(concertBaseName(name))}`;
+      const response = await fetch(`${apiBaseUrl}${lookupPath}`);
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
       const payload = await inferConcertPayloadColumns(await response.json());
       openConcertPayloadInTab(payload, {
@@ -2662,7 +2688,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         if (isMonacoSuggestVisible()) {
           return;
         }
-        if (selectedNode && hasEditorChanges(selectedNode, editData)) {
+        if (
+          selectedNode &&
+          hasEditorChanges(selectedNode, editData, {
+            ignoreAutomaticConnection: true,
+          })
+        ) {
           event.preventDefault();
           event.stopPropagation();
           setIsSaveChangesDialogOpen(true);
@@ -3164,7 +3195,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [clearNodeSelection]);
 
   const requestEditorClose = useCallback(() => {
-    if (selectedNode && hasEditorChanges(selectedNode, editData)) {
+    if (
+      selectedNode &&
+      hasEditorChanges(selectedNode, editData, {
+        ignoreAutomaticConnection: true,
+      })
+    ) {
       setIsSaveChangesDialogOpen(true);
       return;
     }
@@ -3298,12 +3334,15 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
     const hasChanges = hasEditorChanges(selectedNode, editData);
     let nextEditData = editData;
+    if (["dbRead", "dbWrite"].includes(selectedNode.type)) {
+      nextEditData = omitKeys(editData, new Set(["connectionWasAutoSelected"]));
+    }
     if (selectedNode.type === "concert") {
       try {
         if (editData.concertInputsLoading) {
           throw new Error("Wait for the selected Concert input definitions to finish loading.");
         }
-        if (!editData.concertId || !editData.concertName) {
+        if (!editData.concertName) {
           throw new Error("Select a Concert before saving the Concert Call node.");
         }
         if (editData.concertLoadError) {
@@ -3328,7 +3367,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         showError(`Save Concert Call failed: ${error.message}`);
         return;
       }
-      if (nextEditData.concertId === concertId) {
+      if (nextEditData.concertName === concertName) {
         setRun({
           status: "error",
           nodes: {},
@@ -3685,11 +3724,44 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return;
     }
 
+    let targetNodes;
+    try {
+      targetNodes = runTargetNodes(nodes, edges, mode, selectedNode?.id);
+    } catch (error) {
+      setActiveRunId(null);
+      setRun({ status: "error", nodes: {}, error: error.message });
+      return;
+    }
+    const validationErrors = validateRunNodes(targetNodes, edges);
+    if (validationErrors.length) {
+      const errorsById = new Map(validationErrors.map((item) => [item.nodeId, item]));
+      const failedNodes = Object.fromEntries(validationErrors.map((item) => [
+        item.nodeId,
+        {
+          id: item.nodeId,
+          name: item.nodeName,
+          type: item.nodeType,
+          status: "error",
+          error: `Required settings are missing: ${item.fields.join(", ")}`,
+        },
+      ]));
+      setNodes((currentNodes) => currentNodes.map((node) => (
+        errorsById.has(node.id)
+          ? { ...node, data: { ...node.data, status: "error" } }
+          : node
+      )));
+      setActiveRunId(null);
+      setRun({
+        status: "error",
+        nodes: failedNodes,
+        error: runValidationMessage(validationErrors),
+      });
+      return;
+    }
+
     const runConcertName = safeConcertPathName(concertName);
     try {
-      if (mode !== "selected") {
-        await validateCalledConcerts(nodes);
-      }
+      await validateCalledConcerts(targetNodes);
     } catch (error) {
       if (error?.name === "AbortError") return;
       setRun({

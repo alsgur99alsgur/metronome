@@ -4,12 +4,12 @@
   },
   "oracle": {
     "poolMin": 1,
-    "poolMax": 10,
-    "poolIncrement": 1,
+    "poolMax": 100,
+    "poolIncrement": 50,
     "writeBatchSize": 1000
   },
   "executor": {
-    "workers": 10,
+    "workers": 100,
     "timeoutSeconds": 60,
     "nodeLogLimitKb": 1024
   },

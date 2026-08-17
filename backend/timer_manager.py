@@ -21,15 +21,15 @@ def _epoch_from_iso(value):
 
 
 class TimerManager:
-    def __init__(self, path, run_callback, status_callback=None, poll_seconds=0.5):
+    def __init__(self, path, run_callback, poll_seconds=0.5):
         self.path = os.path.abspath(path)
         self.run_callback = run_callback
-        self.status_callback = status_callback
         self.poll_seconds = poll_seconds
         self._lock = Lock()
         self._stop_event = Event()
         self._thread = None
         self._timers = {}
+        self._completed_runs = {}
         self._load()
 
     @staticmethod
@@ -108,7 +108,6 @@ class TimerManager:
         os.replace(temporary, self.path)
 
     def list(self):
-        self._refresh_statuses()
         with self._lock:
             return [self._public(timer) for timer in self._timers.values()]
 
@@ -142,40 +141,40 @@ class TimerManager:
         if self._thread:
             self._thread.join(timeout=2)
 
-    def _refresh_statuses(self):
-        if not self.status_callback:
-            return
+    @staticmethod
+    def _apply_completion(timer, state):
+        timer["lastStatus"] = state.get("status")
+        timer["lastDurationMs"] = (state.get("timing") or {}).get("totalElapsedMs")
+        timer["lastError"] = state.get("error") if state.get("status") == "error" else None
+        timer["updatedAt"] = _now_iso()
+
+    def complete_run(self, run_id, state):
+        if not run_id or not isinstance(state, dict):
+            return False
         with self._lock:
-            targets = [(item["id"], item.get("lastRunId")) for item in self._timers.values() if item.get("lastRunId") and item.get("lastStatus") in ("queued", "running")]
-        updates = []
-        for timer_id, run_id in targets:
-            try:
-                state = self.status_callback(run_id)
-            except Exception:
-                continue
-            updates.append((timer_id, state))
-        if not updates:
-            return
-        with self._lock:
-            changed = False
-            for timer_id, state in updates:
-                timer = self._timers.get(timer_id)
-                if not timer:
-                    continue
-                timer["lastStatus"] = state.get("status")
-                timer["lastDurationMs"] = state.get("timing", {}).get("totalElapsedMs")
-                if state.get("status") == "error":
-                    timer["lastError"] = "Concert run failed."
-                changed = True
-            if changed:
-                self._save_locked()
+            timer = next(
+                (item for item in self._timers.values() if item.get("lastRunId") == run_id),
+                None,
+            )
+            if timer is None:
+                # A very short run can finish before _execute stores lastRunId.
+                self._completed_runs[run_id] = (time.monotonic(), dict(state))
+                return False
+            self._apply_completion(timer, state)
+            self._save_locked()
+            return True
 
     def _run_loop(self):
         while not self._stop_event.wait(self.poll_seconds):
-            self._refresh_statuses()
             now = time.time()
             due = []
             with self._lock:
+                cutoff = time.monotonic() - 60
+                self._completed_runs = {
+                    run_id: item
+                    for run_id, item in self._completed_runs.items()
+                    if item[0] >= cutoff
+                }
                 for timer in self._timers.values():
                     next_epoch = timer.get("nextRunEpoch")
                     if timer["enabled"] and next_epoch is not None and next_epoch <= now:
@@ -198,4 +197,7 @@ class TimerManager:
             if current is None:
                 return
             current.update({"lastRunAt": run_at, "lastRunId": run_id, "lastStatus": status, "lastDurationMs": None, "lastError": error, "updatedAt": _now_iso()})
+            completed_entry = self._completed_runs.pop(run_id, None) if run_id else None
+            if completed_entry is not None:
+                self._apply_completion(current, completed_entry[1])
             self._save_locked()

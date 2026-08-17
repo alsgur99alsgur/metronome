@@ -5,9 +5,14 @@ import time
 import traceback
 
 from cache_data_store import CacheDataStore
+from app_config import config_int
 from concert_builder import build_concert, collect_dependencies, selected_concert_graph
 from executor import Executor
-from oracle_client import close_all_pools
+from oracle_client import (
+    close_all_pools,
+    pool_initialization_ms,
+    reset_pool_initialization_timing,
+)
 from replay_data_store import ReplayDataStore
 from resource_store import ResourceStore
 from variable_types import runtime_params
@@ -61,6 +66,15 @@ def run_concert_process(concert, input_variables):
     run_id = context["runId"]
     concert_name = concert["name"]
     started = time.time()
+    process_create_ms = max(
+        0,
+        int((started - context.get("processStartRequestedAt", started)) * 1000),
+    )
+    reset_pool_initialization_timing()
+    execution_settings = {
+        "workers": config_int("executor", "workers"),
+        "oraclePoolMax": config_int("oracle", "poolMax"),
+    }
     executor = None
     cache_store = None
     resource_store = ResourceStore(context["stageRoot"])
@@ -171,7 +185,14 @@ def run_concert_process(concert, input_variables):
                     task.model_artifact_dirs.append(cache_store.path)
                 task.model_artifact_key = None
 
-        timing = {"buildConcertMs": int((time.time() - build_started) * 1000), "executionMs": 0, "replaySaveMs": 0, "cacheSaveMs": 0}
+        timing = {
+            "processCreateMs": process_create_ms,
+            "oraclePoolInitMs": 0,
+            "buildConcertMs": int((time.time() - build_started) * 1000),
+            "executionMs": 0,
+            "replaySaveMs": 0,
+            "cacheSaveMs": 0,
+        }
 
         had_error = False
 
@@ -203,14 +224,22 @@ def run_concert_process(concert, input_variables):
             cancel_event=cancel_event,
             stdout_router=stdout_router,
             stderr_router=stderr_router,
+            workers=execution_settings["workers"],
         )
-        emit("started", pid=os.getpid(), cacheId=cache_id, replayId=output_replay_id)
+        emit(
+            "started",
+            pid=os.getpid(),
+            cacheId=cache_id,
+            replayId=output_replay_id,
+            execution=execution_settings,
+        )
         executor.start()
         for root in roots:
             executor.submit(root)
         executor.wait()
         status = "canceled" if cancel_event.is_set() else ("error" if had_error else "success")
-        timing["totalElapsedMs"] = int((time.time() - started) * 1000)
+        timing["oraclePoolInitMs"] = pool_initialization_ms()
+        timing["totalElapsedMs"] = process_create_ms + int((time.time() - started) * 1000)
         if cache_store:
             cache_store.finish(status, timing=timing)
         emit("finished", status=status, timing=timing, cacheId=cache_id, replayId=output_replay_id)
@@ -219,11 +248,24 @@ def run_concert_process(concert, input_variables):
             try:
                 cache_store.finish(
                     "error",
-                    timing={"totalElapsedMs": int((time.time() - started) * 1000)},
+                    timing={
+                        "totalElapsedMs": process_create_ms + int((time.time() - started) * 1000),
+                        "processCreateMs": process_create_ms,
+                        "oraclePoolInitMs": pool_initialization_ms(),
+                    },
                 )
             except Exception:
                 pass
-        emit("failed", error=str(exc), logs=traceback.format_exc(), timing={"totalElapsedMs": int((time.time() - started) * 1000)})
+        emit(
+            "failed",
+            error=str(exc),
+            logs=traceback.format_exc(),
+            timing={
+                "totalElapsedMs": process_create_ms + int((time.time() - started) * 1000),
+                "processCreateMs": process_create_ms,
+                "oraclePoolInitMs": pool_initialization_ms(),
+            },
+        )
     finally:
         if executor is not None:
             executor.shutdown()

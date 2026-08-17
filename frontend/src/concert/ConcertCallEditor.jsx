@@ -13,12 +13,6 @@ const safeName = (value) => {
 
 const safeConcertPathName = validateConcertPath;
 
-const encodeConcertPath = (value) =>
-  String(value || "")
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-
 const normalizeVariableName = (value) => {
   const name = String(value || "").trim().replace(/^\$+/, "");
   return name ? `$${safeName(name)}` : "$var";
@@ -131,7 +125,7 @@ export default function ConcertCallEditor({
   const { showError } = useErrorDialog();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
-  const loadConcertInputsByName = async (concertName, concertId = "") => {
+  const loadConcertInputsByName = async (concertName) => {
     let nextConcertName;
     try {
       nextConcertName = safeConcertPathName(concertName);
@@ -147,9 +141,9 @@ export default function ConcertCallEditor({
 
     let response;
     try {
-      response = await fetch(concertId
-        ? `${apiBaseUrl}/playings-by-id/${encodeURIComponent(concertId)}`
-        : `${apiBaseUrl}/playings/${encodeConcertPath(nextConcertName)}`);
+      response = await fetch(
+        `${apiBaseUrl}/playings-by-name/${encodeURIComponent(concertBaseName(nextConcertName))}`,
+      );
     } catch (error) {
       showError(`Load Concert failed: ${error.message}`);
       setEditData((current) => ({
@@ -207,7 +201,7 @@ export default function ConcertCallEditor({
       concertInputsLoading: true,
     }));
     setIsPickerOpen(false);
-    await loadConcertInputsByName(concertName, concert.concertId);
+    await loadConcertInputsByName(concertName);
   };
 
   const openPicker = () => setIsPickerOpen(true);

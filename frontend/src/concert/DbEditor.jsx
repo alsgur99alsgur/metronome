@@ -124,6 +124,7 @@ export default function DbEditor({
               connection: nextConnections.includes(lastConnection)
                 ? lastConnection
                 : nextConnections[0],
+              connectionWasAutoSelected: true,
             };
           });
         }
@@ -229,6 +230,7 @@ export default function DbEditor({
           setEditData((current) => ({
             ...current,
             connection: nextConnection,
+            connectionWasAutoSelected: false,
           }));
         }}
       >

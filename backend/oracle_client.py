@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from threading import Lock
 
@@ -21,8 +22,27 @@ _SQL_COMMENT_OR_STRING_PATTERN = re.compile(r"(--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'
 _POOL_LOCK = Lock()
 _SCHEMA_LOCK = Lock()
 _ORACLE_CLIENT_LOCK = Lock()
+_POOL_TIMING_LOCK = Lock()
 _ORACLE_CLIENT_INITIALIZED = False
 _POOLS = {}
+_POOL_INITIALIZATION_SECONDS = 0.0
+
+
+def reset_pool_initialization_timing():
+    global _POOL_INITIALIZATION_SECONDS
+    with _POOL_TIMING_LOCK:
+        _POOL_INITIALIZATION_SECONDS = 0.0
+
+
+def pool_initialization_ms():
+    with _POOL_TIMING_LOCK:
+        return int(round(_POOL_INITIALIZATION_SECONDS * 1000))
+
+
+def _record_pool_initialization(started):
+    global _POOL_INITIALIZATION_SECONDS
+    with _POOL_TIMING_LOCK:
+        _POOL_INITIALIZATION_SECONDS += time.perf_counter() - started
 
 
 def close_all_pools():
@@ -260,7 +280,6 @@ def test_connection_settings(name, user, password, dsn, original_name=""):
 
 def get_connection_pool(connection_name):
     connection = load_connection(connection_name)
-    oracledb = _load_oracledb()
     pool_settings = (
         config_int("oracle", "poolMin"),
         config_int("oracle", "poolMax"),
@@ -281,7 +300,9 @@ def get_connection_pool(connection_name):
                 pass
         pool = _POOLS.get(key)
         if pool is None:
+            initialization_started = time.perf_counter()
             try:
+                oracledb = _load_oracledb()
                 pool = oracledb.create_pool(
                     user=connection.user,
                     password=connection.password,
@@ -292,6 +313,8 @@ def get_connection_pool(connection_name):
                 )
             except Exception as exc:
                 raise OracleConnectionFailure(f"Oracle connection pool failed: {connection.name}: {exc}") from exc
+            finally:
+                _record_pool_initialization(initialization_started)
             _POOLS[key] = pool
     return connection, pool
 

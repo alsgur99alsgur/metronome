@@ -165,9 +165,9 @@ Input 변수와 Global 변수 타입은 `string`, `number`만 허용한다. User
 - `backend.consoleMode`: Windows 백엔드 콘솔 표시 여부 (`true`/`false`)
 - `oracle.poolMin`, `poolMax`, `poolIncrement`, `writeBatchSize`
 - `executor.workers`, `timeoutSeconds`
-- `storage.retentionDays`: Replay, run cache, Timer run-status, Stage Cache 버전 보관 일수 (기본 7일)
+- `storage.retentionDays`: Replay, run cache, Stage Cache 버전 보관 일수 (기본 7일)
 
-설정값은 필요한 시점마다 `config.json`을 다시 읽으므로 서버 재시작 없이 다음 사용부터 반영된다. Executor 설정은 새 실행부터 적용되고, Oracle pool 설정이 바뀌면 다음 pool 요청에서 기존 pool을 닫고 새 설정으로 생성한다. Windows `backend.consoleMode`도 파일 변경을 감지해 콘솔 창 표시를 갱신한다. 보존 기간 관리자는 주기적으로 최신 값을 읽어 만료된 Replay/cache/Timer run-status를 삭제한다. Playing, Rehearsal, Backup을 포함한 Concert 파일은 보존 정리 대상이 아니다.
+설정값은 필요한 시점마다 `config.json`을 다시 읽으므로 서버 재시작 없이 다음 사용부터 반영된다. Executor 설정은 새 실행부터 적용되고, Oracle pool 설정이 바뀌면 다음 pool 요청에서 기존 pool을 닫고 새 설정으로 생성한다. Windows `backend.consoleMode`도 파일 변경을 감지해 콘솔 창 표시를 갱신한다. 보존 기간 관리자는 주기적으로 최신 값을 읽어 만료된 Replay/cache와 Stage Cache 버전을 삭제한다. Timer 실행 완료 상태는 run monitor가 TimerManager에 직접 전달한다. Playing, Rehearsal, Backup을 포함한 Concert 파일은 보존 정리 대상이 아니다.
 
 Replay 목록과 run cache 조회에 Concert 이름이 있으면 `replay/<concert>/`만 탐색한다. 데이터 뷰어와 실행 상태 API는 Concert 이름을 전달하여 전체 replay 루트 순회를 피한다.
 
