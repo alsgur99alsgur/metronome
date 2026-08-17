@@ -23,6 +23,9 @@ backend/stage/
 
 events.md
 *.parquet
+.vscode/
+config.json
+servers.json
 
 *.concert
 !backend/examples/backend_performance_benchmark.concert

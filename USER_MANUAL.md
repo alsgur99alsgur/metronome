@@ -243,7 +243,7 @@ Oracle SQL 조회 결과를 pandas DataFrame으로 출력한다.
 - 입력이 없으면 Concert 변수 값을 한 건의 bind record로 사용한다.
 - 성공하면 입력 DataFrame을 그대로 다음 노드로 전달한다.
 - Oracle 연결이 PM 상태로 실패하면 write를 실행하지 않고 입력 DataFrame을 전달한다.
-- Replay에서 side effect를 다시 실행할 수 있으므로 Replay 실행 전 대상 SQL의 영향을 확인한다.
+- Replay Run에서는 DB Write를 실행하지 않는다. 입력 DataFrame만 다음 노드로 전달하고 해당 노드는 `skipped`로 기록한다.
 
 ### 4.3 Python
 
