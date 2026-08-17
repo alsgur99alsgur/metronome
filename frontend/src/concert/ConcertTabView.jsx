@@ -3734,6 +3734,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
     const validationErrors = validateRunNodes(targetNodes, edges);
     if (validationErrors.length) {
+      const validationMessage = runValidationMessage(validationErrors);
       const errorsById = new Map(validationErrors.map((item) => [item.nodeId, item]));
       const failedNodes = Object.fromEntries(validationErrors.map((item) => [
         item.nodeId,
@@ -3754,8 +3755,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       setRun({
         status: "error",
         nodes: failedNodes,
-        error: runValidationMessage(validationErrors),
+        error: validationMessage,
       });
+      showError(validationMessage);
       return;
     }
 

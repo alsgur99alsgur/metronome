@@ -68,7 +68,9 @@ async function createWindow() {
     bringWindowToFront(childWindows.get(frameName));
   });
   const indexPath = adminApp
-    ? path.join(process.resourcesPath, "admin-dist", "index.html")
+    ? app.isPackaged
+      ? path.join(process.resourcesPath, "admin-dist", "index.html")
+      : path.join(__dirname, "../../admin-frontend/dist/index.html")
     : path.join(__dirname, "../dist/index.html");
   window.once("ready-to-show", () => window.show());
   await window.loadFile(indexPath);
