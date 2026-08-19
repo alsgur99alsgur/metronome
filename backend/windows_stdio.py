@@ -32,26 +32,31 @@ def ensure_windows_standard_streams():
         return
 
     stream_specs = (
-        ("stdin", "CONIN$", "r"),
-        ("stdout", "CONOUT$", "w"),
-        ("stderr", "CONOUT$", "w"),
+        ("stdin", "CONIN$", "r", 0),
+        ("stdout", "CONOUT$", "w", 1),
+        ("stderr", "CONOUT$", "w", 2),
     )
-    for attribute, console_path, mode in stream_specs:
+    for attribute, console_path, mode, standard_fd in stream_specs:
         current = getattr(sys, attribute)
-        if _has_valid_windows_handle(current):
-            continue
-        try:
-            replacement = open(
-                console_path,
-                mode,
-                encoding="utf-8",
-                buffering=1,
-            )
-        except OSError:
-            replacement = open(
-                os.devnull,
-                mode,
-                encoding="utf-8",
-                buffering=1,
-            )
-        setattr(sys, attribute, replacement)
+        if not _has_valid_windows_handle(current):
+            try:
+                current = open(
+                    console_path,
+                    mode,
+                    encoding="utf-8",
+                    buffering=1,
+                )
+            except OSError:
+                current = open(
+                    os.devnull,
+                    mode,
+                    encoding="utf-8",
+                    buffering=1,
+                )
+            setattr(sys, attribute, current)
+
+        # Pyomo capture_output duplicates descriptors 0/1/2 directly. A
+        # packaged windowless process can have usable sys streams while those
+        # fixed descriptors still reference invalid Windows handles.
+        if current.fileno() != standard_fd:
+            os.dup2(current.fileno(), standard_fd, inheritable=True)

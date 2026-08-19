@@ -111,10 +111,12 @@ class ThreadLocalOutputRouter:
         return bool(target is not None and getattr(target, "isatty", lambda: False)())
 
     def fileno(self):
-        target = self._target()
-        if target is None or not hasattr(target, "fileno"):
+        # In-memory node log targets intentionally have no descriptor. Native
+        # libraries (notably Pyomo's capture_output on Windows) still require
+        # the process stream descriptor while writes remain thread-local.
+        if self.fallback is None or not hasattr(self.fallback, "fileno"):
             raise io.UnsupportedOperation("fileno")
-        return target.fileno()
+        return self.fallback.fileno()
 
     def __getattr__(self, name):
         if self.fallback is None:
