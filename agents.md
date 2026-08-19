@@ -67,7 +67,7 @@
 
 ## Runtime Data
 
-`METRONOME_DATA_DIR`가 설정되면 백엔드 데이터는 해당 경로를 사용하고, 없으면 `backend`를 사용한다.
+백엔드 데이터는 개발 환경에서는 `backend`, 패키지에서는 백엔드 실행 파일이 있는 디렉터리를 사용한다. 환경변수 기반 데이터 경로는 사용하지 않는다.
 
 - Playing Concert: `playings/*.concert`
 - Rehearsal: `rehearsals/*.concert`

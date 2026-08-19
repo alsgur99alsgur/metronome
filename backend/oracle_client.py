@@ -7,13 +7,9 @@ from threading import Lock
 
 import pandas as pd
 
-from app_config import config_int
+from app_config import BACKEND_ROOT, config_int
 
 
-BACKEND_ROOT = os.environ.get(
-    "METRONOME_DATA_DIR",
-    os.path.dirname(os.path.abspath(__file__)),
-)
 CONNECTIONS_PATH = os.path.join(BACKEND_ROOT, "connections.json")
 _BIND_PATTERN = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 _SQL_COMMENT_OR_STRING_PATTERN = re.compile(r"(--[^\n]*|/\*.*?\*/|'(?:''|[^'])*')", re.DOTALL)

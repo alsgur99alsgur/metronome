@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import OutputColumnsTitle from "./OutputColumnsTitle";
 
 function ColumnList({ columns = [], emptyText }) {
   return (
@@ -36,10 +37,10 @@ function InputColumnsPanel({ inputDataframes = [] }) {
   );
 }
 
-function OutputColumnsPanel({ columns = [], emptyText, error }) {
+function OutputColumnsPanel({ columns = [], emptyText, error, onRefresh, refreshing }) {
   return (
     <aside className="column-side-panel">
-      <div className="column-title">Output Columns</div>
+      <OutputColumnsTitle onRefresh={onRefresh} refreshing={refreshing} />
       {error && <div className="column-schema-error">{error}</div>}
       <ColumnList columns={columns} emptyText={emptyText} />
     </aside>
@@ -58,6 +59,8 @@ export default function DbEditor({
   apiBaseUrl = "http://localhost:8000",
   globalVariables = [],
   inputVariables = [],
+  onRefreshOutputColumns,
+  refreshingOutputColumns = false,
 }) {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
@@ -261,6 +264,8 @@ export default function DbEditor({
           columns={outputColumns}
           emptyText={outputMessage}
           error={outputError}
+          onRefresh={onRefreshOutputColumns}
+          refreshing={refreshingOutputColumns}
         />
       </div>
     </div>

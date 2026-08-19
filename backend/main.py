@@ -19,7 +19,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from cache_data_store import CacheDataStore
-from app_config import config_int
+from app_config import BACKEND_ROOT, config_int
 from concert_builder import selected_concert_graph
 from concert_store import ConcertStore
 from node_run_validation import validate_run_nodes, validation_message
@@ -41,10 +41,6 @@ from storage_retention import StorageRetentionManager
 from run_process import ConcertRunProcess
 from variable_types import runtime_params as _typed_runtime_params
 
-BACKEND_ROOT = os.environ.get(
-    "METRONOME_DATA_DIR",
-    os.path.dirname(os.path.abspath(__file__)),
-)
 REPLAY_ROOT = os.path.join(BACKEND_ROOT, "replay")
 PLAYING_ROOT = os.path.join(BACKEND_ROOT, "playings")
 STAGE_ROOT = os.path.join(BACKEND_ROOT, "stage")
@@ -143,7 +139,7 @@ class SchemaInferRequest(BaseModel):
     globalVariables: list = Field(default_factory=list)
     inputVariables: list = Field(default_factory=list)
     params: dict[str, Any] = Field(default_factory=dict)
-    startNodeId: Optional[str] = None
+    startNodeIds: list[str] = Field(default_factory=list)
 
 
 class DataFilterRequest(BaseModel):
@@ -739,7 +735,7 @@ def infer_schema(req: SchemaInferRequest):
         nodes,
         edges,
         params=params,
-        start_node_id=req.startNodeId if req.startNodeId in node_ids else None,
+        start_node_ids=[node_id for node_id in req.startNodeIds if node_id in node_ids],
     )
 
 

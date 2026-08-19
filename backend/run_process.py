@@ -17,6 +17,7 @@ from replay_data_store import ReplayDataStore
 from resource_store import ResourceStore
 from variable_types import runtime_params
 from thread_local_output import install_thread_local_output, restore_thread_local_output
+from windows_stdio import ensure_windows_standard_streams
 
 
 class _NoReplayStore:
@@ -42,6 +43,7 @@ class ConcertRunProcess(multiprocessing.Process):
         self.cancel_event = cancel_event
 
     def run(self):
+        ensure_windows_standard_streams()
         process = multiprocessing.current_process()
         process.run_context = self.run_context
         process.event_queue = self.event_queue

@@ -34,6 +34,7 @@ import { openDataWindow } from "./DataViewerWindow";
 import InputEditor from "./InputEditor";
 import NodePalette from "./NodePalette";
 import OutputEditor from "./OutputEditor";
+import OutputColumnsTitle from "./OutputColumnsTitle";
 import OplEditor, { buildPyomoCode } from "./OplEditor";
 import DbEditor from "./DbEditor";
 import ResourceEditor from "./ResourceEditor";
@@ -46,6 +47,7 @@ import RunCacheDialog from "./RunCacheDialog";
 import RunParamsDialog from "./RunParamsDialog";
 import RunningDialog from "./RunningDialog";
 import SaveChangesDialog from "./SaveChangesDialog";
+import DuplicateConcertDialog from "./DuplicateConcertDialog";
 import VariablesDialog from "./VariablesDialog";
 import { coerceVariableValue } from "./variableTypes";
 import { nodeTypes } from "./nodeTypes";
@@ -193,6 +195,7 @@ const createBlankTab = () => ({
   concertName: "untitled_concert",
   concertFileLabel: "untitled_concert",
   concertFileHandle: null,
+  concertLocalPath: "",
   version: "",
   nodes: [],
   edges: [],
@@ -375,6 +378,14 @@ const getEditableSnapshot = (type, data = {}) => {
 
 const hasEditorChanges = (node, editData) => {
   if (!node || !editData) return false;
+  if (
+    node.type === "opl" &&
+    ["objectiveSense", "solver", "solverTimeoutSeconds", "mipGap"].some(
+      (key) => !Object.hasOwn(node.data || {}, key) && Object.hasOwn(editData, key),
+    )
+  ) {
+    return true;
+  }
   return (
     JSON.stringify(getEditableSnapshot(node.type, node.data)) !==
     JSON.stringify(getEditableSnapshot(node.type, editData))
@@ -576,6 +587,15 @@ const cleanNodeForSave = (node = {}) => {
 };
 
 const editableNodeData = (node) => {
+  if (node.type === "opl") {
+    return {
+      ...node.data,
+      objectiveSense: node.data.objectiveSense || "maximize",
+      solver: node.data.solver || "highs",
+      solverTimeoutSeconds: node.data.solverTimeoutSeconds ?? 60,
+      mipGap: node.data.mipGap ?? 0.01,
+    };
+  }
   if (node.type !== "concert") return { ...node.data };
   const inputParamValues =
     node.data.inputParamValues ||
@@ -673,27 +693,20 @@ const hasConcertEdgeChange = (changes) =>
   changes.some((change) => change.type !== "select");
 
 function LoopInEditor({ editData, setEditData, inputColumns = [] }) {
-  const [newGroupByColumn, setNewGroupByColumn] = useState("");
   const selectedGroupByColumns = new Set(
     String(editData.groupByColumns || "")
       .split(",")
       .map((column) => column.trim())
       .filter(Boolean),
   );
-  const knownInputColumnNames = new Set(
-    inputColumns.map((column) => column.name),
-  );
-  const customGroupByColumns = Array.from(selectedGroupByColumns).filter(
-    (columnName) => !knownInputColumnNames.has(columnName),
-  );
-
   const updateGroupByColumn = (columnName, checked) => {
     setEditData((current) => {
+      const inputColumnNames = new Set(inputColumns.map((column) => column.name));
       const nextColumns = new Set(
         String(current.groupByColumns || "")
           .split(",")
           .map((column) => column.trim())
-          .filter(Boolean),
+          .filter((column) => column && inputColumnNames.has(column)),
       );
       if (checked) {
         nextColumns.add(columnName);
@@ -705,13 +718,6 @@ function LoopInEditor({ editData, setEditData, inputColumns = [] }) {
         groupByColumns: Array.from(nextColumns).join(", "),
       };
     });
-  };
-
-  const addCustomGroupByColumn = () => {
-    const columnName = newGroupByColumn.trim();
-    if (!columnName || selectedGroupByColumns.has(columnName)) return;
-    updateGroupByColumn(columnName, true);
-    setNewGroupByColumn("");
   };
 
   return (
@@ -794,46 +800,9 @@ function LoopInEditor({ editData, setEditData, inputColumns = [] }) {
                   ))
                 ) : (
                   <div className="column-empty">
-                    Input columns are not available yet. Add them manually below.
+                    Input columns are not available yet.
                   </div>
                 )}
-              </div>
-
-              <label className="field-label">Manual Group Columns</label>
-              <div className="loop-group-manual-list">
-                {customGroupByColumns.map((columnName) => (
-                  <div className="loop-group-manual-row" key={columnName}>
-                    <input className="text-input" value={columnName} readOnly />
-                    <button
-                      type="button"
-                      className="row-delete-button"
-                      onClick={() => updateGroupByColumn(columnName, false)}
-                      title={`Delete ${columnName}`}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
-                <div className="loop-group-manual-row">
-                  <input
-                    className="text-input"
-                    value={newGroupByColumn}
-                    placeholder="Column name"
-                    onChange={(event) => setNewGroupByColumn(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      addCustomGroupByColumn();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={addCustomGroupByColumn}
-                    disabled={!newGroupByColumn.trim()}
-                  >
-                    Add
-                  </button>
-                </div>
               </div>
             </div>
           )}
@@ -850,6 +819,8 @@ function LoopOutEditor({
   setEditData,
   outputColumns = [],
   iterationMode = "allRows",
+  onRefreshOutputColumns,
+  refreshingOutputColumns = false,
 }) {
   const [selectedInputColumns, setSelectedInputColumns] = useState(new Set());
   const [selectedConditionColumns, setSelectedConditionColumns] = useState(
@@ -1116,7 +1087,10 @@ function LoopOutEditor({
       )}
         </div>
         <aside className="column-side-panel">
-          <div className="column-title">Output Columns</div>
+          <OutputColumnsTitle
+            onRefresh={onRefreshOutputColumns}
+            refreshing={refreshingOutputColumns}
+          />
           <div className="column-list">
             {outputColumns.length ? (
               outputColumns.map((column) => (
@@ -1151,6 +1125,8 @@ function EditorPanel({
   onSave,
   onClose,
   onRequestClose,
+  onRefreshOutputColumns,
+  refreshingOutputColumns,
 }) {
   const [isPyomoCodeOpen, setIsPyomoCodeOpen] = useState(false);
   const [pyomoCopyToast, setPyomoCopyToast] = useState("");
@@ -1217,6 +1193,8 @@ function EditorPanel({
               apiBaseUrl={apiBaseUrl}
               globalVariables={globalVariables}
               inputVariables={inputVariables}
+              onRefreshOutputColumns={onRefreshOutputColumns}
+              refreshingOutputColumns={refreshingOutputColumns}
             />
           )}
           {selectedNode.type === "python" && (
@@ -1227,6 +1205,9 @@ function EditorPanel({
               inputDataframes={inputDataframes}
               outputColumns={outputColumns}
               outputMessage={outputMessage}
+              outputError={outputError}
+              onRefreshOutputColumns={onRefreshOutputColumns}
+              refreshingOutputColumns={refreshingOutputColumns}
             />
           )}
           {selectedNode.type === "opl" && (
@@ -1248,6 +1229,8 @@ function EditorPanel({
               apiBaseUrl={apiBaseUrl}
               globalVariables={globalVariables}
               inputVariables={inputVariables}
+              onRefreshOutputColumns={onRefreshOutputColumns}
+              refreshingOutputColumns={refreshingOutputColumns}
             />
           )}
           {selectedNode.type === "concert" && (
@@ -1258,6 +1241,8 @@ function EditorPanel({
               inputDataframes={inputDataframes}
               outputColumns={outputColumns}
               outputMessage={outputMessage}
+              onRefreshOutputColumns={onRefreshOutputColumns}
+              refreshingOutputColumns={refreshingOutputColumns}
             />
           )}
           {selectedNode.type === "concertInput" && <InputEditor />}
@@ -1269,6 +1254,9 @@ function EditorPanel({
               kind={selectedNode.type.startsWith("cache") ? "cache" : "file"}
               write={selectedNode.type.endsWith("Write")}
               apiBaseUrl={apiBaseUrl}
+              inputDataframes={inputDataframes}
+              onRefreshOutputColumns={selectedNode.type === "cacheRead" ? onRefreshOutputColumns : undefined}
+              refreshingOutputColumns={refreshingOutputColumns}
             />
           )}
           {selectedNode.type === "loopIn" && (
@@ -1288,6 +1276,8 @@ function EditorPanel({
               setEditData={setEditData}
               iterationMode={loopIterationMode}
               outputColumns={outputColumns || []}
+              onRefreshOutputColumns={onRefreshOutputColumns}
+              refreshingOutputColumns={refreshingOutputColumns}
             />
           )}
           {selectedNode.type === "text" && (
@@ -1443,6 +1433,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const [concertName, setConcertName] = useState("untitled_concert");
   const [concertFileLabel, setConcertFileLabel] = useState("untitled_concert");
   const [concertFileHandle, setConcertFileHandle] = useState(null);
+  const [concertLocalPath, setConcertLocalPath] = useState("");
+  const [duplicateServerConcert, setDuplicateServerConcert] = useState(null);
+  const [isSavingDuplicateConcert, setIsSavingDuplicateConcert] = useState(false);
   const [version, setVersion] = useState("");
   const apiBaseUrl = defaultApiBaseUrl;
   const [replayServerName, setReplayServerName] = useState(defaultServerName);
@@ -1453,6 +1446,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     ? `http://${replayServer.host}:${replayServer.port}`
     : defaultApiBaseUrl;
   const [editData, setEditData] = useState(null);
+  const [columnInferencePreview, setColumnInferencePreview] = useState(null);
+  const [refreshingOutputColumns, setRefreshingOutputColumns] = useState(false);
   const [run, setRun] = useState(null);
   const [activeRunId, setActiveRunId] = useState(null);
   const [openingConcertName, setOpeningConcertName] = useState("");
@@ -1490,6 +1485,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const contextMenuRef = useRef(null);
   const reactFlowRef = useRef(null);
   const replayRequestRef = useRef(0);
+  const schemaInferenceRequestRef = useRef(0);
   const graphRef = useRef({ nodes: initialNodes, edges: initialEdges });
   const viewportRef = useRef({ x: 0, y: 0, zoom: 1 });
   const canvasRef = useRef(null);
@@ -1583,6 +1579,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       concertName,
       concertFileLabel,
       concertFileHandle,
+      concertLocalPath,
       version,
       nodes: cloneValue(nodes),
       edges: cloneValue(edges),
@@ -1613,6 +1610,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       activeRunId,
       concertFileHandle,
       concertFileLabel,
+      concertLocalPath,
       concertName,
       concertId,
       lastCommitId,
@@ -1649,6 +1647,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       setConcertName(tab.concertName);
       setConcertFileLabel(tab.concertFileLabel);
       setConcertFileHandle(tab.concertFileHandle || null);
+      setConcertLocalPath(tab.concertLocalPath || "");
       setVersion(tab.version || "");
       setNodes(
         cloneValue(tab.nodes || []).map((node) => ({
@@ -1927,7 +1926,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const createTabFromConcertPayload = useCallback(
     (
       payload,
-      { fileHandle = null, fileLabel = "", validatePayload = true } = {},
+      { fileHandle = null, fileLabel = "", localPath = "", validatePayload = true } = {},
     ) => {
       if (
         validatePayload &&
@@ -1946,6 +1945,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         concertName: nextName,
         concertFileLabel: fileLabel || nextName,
         concertFileHandle: fileHandle,
+        concertLocalPath: localPath,
         version: typeof payload.version === "string" ? payload.version : "",
         nodes: payload.nodes.map((node) => {
           if (validatePayload && !supportedNodeTypes.has(node.type)) {
@@ -1979,10 +1979,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     (payload, options = {}) => {
       const nextTab = createTabFromConcertPayload(payload, options);
       const nextLabel = nextTab.concertFileLabel;
+      const nextLocalPath = nextTab.concertLocalPath;
       const nextName = options.validatePayload === false
         ? nextTab.concertName
         : safeConcertPathName(nextTab.concertName);
       const existingTab = tabsRef.current.find((tab) => {
+        if (nextLocalPath) return tab.concertLocalPath === nextLocalPath;
+        if (tab.concertLocalPath) return false;
         if (options.fileHandle && tab.concertFileHandle === options.fileHandle)
           return true;
         if (nextLabel && tab.concertFileLabel === nextLabel) return true;
@@ -2025,12 +2028,27 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     setIsDirty(false);
   }, [concertPayload]);
 
+  const writeElectronConcertFile = useCallback(async (filePath, nameOverride = null, versionOverride = null, commitOverrides = null) => {
+    const payload = {
+      ...concertPayload(nameOverride, versionOverride),
+      ...(commitOverrides || {}),
+    };
+    await window.metronomeElectron.writeConcertFile(
+      filePath,
+      JSON.stringify(payload, null, 2),
+    );
+    if (versionOverride != null) setVersion(versionOverride);
+    if (commitOverrides && Object.hasOwn(commitOverrides, "lastCommitId")) setLastCommitId(commitOverrides.lastCommitId);
+    if (commitOverrides && Object.hasOwn(commitOverrides, "commitId")) setCommitId(commitOverrides.commitId);
+    setIsDirty(false);
+  }, [concertPayload]);
+
   const inferConcertColumns = useCallback(async (
     targetNodes,
     targetEdges,
     targetGlobalVariables = globalVariables,
     targetInputVariables = inputVariables,
-    startNodeId = null,
+    startNodeIds = [],
   ) => {
     const graph = executableGraph(targetNodes, targetEdges);
     if (!graph.nodes.length) {
@@ -2048,25 +2066,24 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         globalVariables: targetGlobalVariables || [],
         inputVariables: targetInputVariables || [],
         params: runParamValues,
-        startNodeId:
-          startNodeId && graph.nodes.some((node) => node.id === startNodeId)
-            ? startNodeId
-            : null,
+        startNodeIds: startNodeIds.filter((nodeId) =>
+          graph.nodes.some((node) => node.id === nodeId)),
       }),
     });
     if (!response.ok) {
       throw new Error(`Infer Concert columns failed: ${await response.text()}`);
     }
     const body = await response.json();
+    const affectedNodeIds = new Set(body.affectedNodeIds || graph.nodes.map((node) => node.id));
     return {
+      affectedNodeIds: [...affectedNodeIds],
       nodes: targetNodes.map((node) => {
+        if (!affectedNodeIds.has(node.id)) return node;
         const inferredColumns = body.nodeColumns?.[node.id] || [];
         const schemaError = body.errors?.[node.id] || undefined;
         const nextData = {
           ...node.data,
-          outputColumns: inferredColumns.length
-            ? inferredColumns
-            : node.data?.outputColumns || [],
+          outputColumns: inferredColumns,
           schemaError,
         };
         if (node.type === "dbRead") {
@@ -2081,51 +2098,124 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       }),
       edges: targetEdges.map((edge) => ({
         ...edge,
-        data: {
-          ...edge.data,
-          columns: body.edgeColumns?.[edge.id] || edge.data?.columns || [],
-        },
+        data: affectedNodeIds.has(edge.source) || affectedNodeIds.has(edge.target)
+          ? { ...edge.data, columns: body.edgeColumns?.[edge.id] || [] }
+          : edge.data,
       })),
     };
   }, [apiBaseUrl, globalVariables, inputVariables, runParamValues]);
 
-  const inferConcertPayloadColumns = useCallback(async (payload) => {
+  const refreshInferredColumns = useCallback(async (startNodeIds, dataOverrides = {}) => {
+    const requestId = ++schemaInferenceRequestRef.current;
+    const snapshot = graphRef.current;
+    const inferenceNodes = snapshot.nodes.map((node) => (
+      dataOverrides[node.id]
+        ? { ...node, data: { ...node.data, ...dataOverrides[node.id] } }
+        : node
+    ));
     try {
       const inferred = await inferConcertColumns(
-        payload.nodes || [],
-        payload.edges || [],
-        payload.globalVariables || [],
-        payload.inputVariables || [],
+        inferenceNodes,
+        snapshot.edges,
+        globalVariables,
+        inputVariables,
+        startNodeIds,
       );
-      return { ...payload, nodes: inferred.nodes, edges: inferred.edges };
+      if (requestId !== schemaInferenceRequestRef.current) return;
+      const affectedNodeIds = new Set(inferred.affectedNodeIds || []);
+      const inferredNodes = new Map(inferred.nodes.map((node) => [node.id, node]));
+      const inferredEdges = new Map(inferred.edges.map((edge) => [edge.id, edge]));
+      const current = graphRef.current;
+      const nextNodes = current.nodes.map((node) => {
+        if (!affectedNodeIds.has(node.id)) return node;
+        const inferredNode = inferredNodes.get(node.id);
+        if (!inferredNode) return node;
+        const nextData = {
+          ...node.data,
+          outputColumns: inferredNode.data?.outputColumns || [],
+          schemaError: inferredNode.data?.schemaError,
+        };
+        if (node.type === "dbRead") {
+          if (inferredNode.data?.dbReadSchema) {
+            nextData.dbReadSchema = inferredNode.data.dbReadSchema;
+          } else {
+            delete nextData.dbReadSchema;
+          }
+        }
+        return { ...node, data: nextData };
+      });
+      const nextEdges = current.edges.map((edge) => {
+        if (!affectedNodeIds.has(edge.source) && !affectedNodeIds.has(edge.target)) return edge;
+        const inferredEdge = inferredEdges.get(edge.id);
+        return inferredEdge ? { ...edge, data: inferredEdge.data } : edge;
+      });
+      graphRef.current = { nodes: nextNodes, edges: nextEdges };
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      return { nodes: nextNodes, edges: nextEdges };
     } catch {
-      return payload;
+      // Schema inference is best-effort and must not block graph editing.
+      return null;
     }
-  }, [inferConcertColumns]);
+  }, [globalVariables, inferConcertColumns, inputVariables, setEdges, setNodes]);
 
-  const validateCalledConcerts = async (targetNodes) => {
-    const concertNames = [
-      ...new Set(
-        targetNodes
-          .filter((node) => node.type === "concert")
-          .map((node) => node.data?.concertName || "")
-          .filter(Boolean),
-      ),
-    ];
-
-    for (const targetConcertName of concertNames) {
-      const response = await fetch(`${apiBaseUrl}/playings-by-name/${encodeURIComponent(targetConcertName)}`);
-      if (response.ok) continue;
-      if (response.status === 404) {
-        throw new Error(`Called Concert not found in backend: ${targetConcertName}`);
+  const refreshSelectedOutputColumns = useCallback(async () => {
+    if (!selectedNode || selectedNode.type === "text" || refreshingOutputColumns) return;
+    setRefreshingOutputColumns(true);
+    const requestId = ++schemaInferenceRequestRef.current;
+    try {
+      const snapshot = graphRef.current;
+      const inferenceNodes = snapshot.nodes.map((node) => (
+        node.id === selectedNode.id && editData
+          ? { ...node, data: { ...node.data, ...editData } }
+          : node
+      ));
+      const preview = await inferConcertColumns(
+        inferenceNodes,
+        snapshot.edges,
+        globalVariables,
+        inputVariables,
+        [selectedNode.id],
+      );
+      if (requestId === schemaInferenceRequestRef.current) {
+        setColumnInferencePreview({
+          sourceNodeId: selectedNode.id,
+          ...preview,
+        });
       }
-      throw new Error(`Load called Concert failed: ${await response.text()}`);
+    } catch {
+      if (requestId === schemaInferenceRequestRef.current) {
+        setColumnInferencePreview(null);
+      }
+    } finally {
+      setRefreshingOutputColumns(false);
     }
-  };
+  }, [
+    editData,
+    globalVariables,
+    inferConcertColumns,
+    inputVariables,
+    refreshingOutputColumns,
+    selectedNode,
+  ]);
 
   const saveConcertAsLocal = useCallback(async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
     if (!isTabOpen) return validateConcertName(concertName);
     const fileName = `${validateConcertName(concertName)}.concert`;
+    if (window.metronomeElectron?.selectConcertSavePath) {
+      const selection = await window.metronomeElectron.selectConcertSavePath(fileName);
+      if (!selection) throw new DOMException("Save cancelled.", "AbortError");
+      const nextName = getFileNameBase(selection.name);
+      const payloadName = deploymentName || nextName;
+      await writeElectronConcertFile(selection.path, payloadName, versionOverride, commitOverrides);
+      setConcertFileHandle(null);
+      setConcertLocalPath(selection.path);
+      setIsTabOpen(true);
+      setConcertName(nextName);
+      setConcertFileLabel(nextName);
+      clearReplayState();
+      return nextName;
+    }
     if ("showSaveFilePicker" in window) {
       const handle = await window.showSaveFilePicker({
         suggestedName: fileName,
@@ -2139,7 +2229,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const nextName = getFileNameBase(handle.name);
       const payloadName = deploymentName || nextName;
       await writeConcertFile(handle, payloadName, versionOverride, commitOverrides);
+      const savedFile = await handle.getFile();
       setConcertFileHandle(handle);
+      setConcertLocalPath(window.metronomeElectron?.getPathForFile(savedFile) || "");
       setIsTabOpen(true);
       setConcertName(nextName);
       setConcertFileLabel(getFileNameBase(handle.name));
@@ -2164,10 +2256,17 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     if (commitOverrides && Object.hasOwn(commitOverrides, "commitId")) setCommitId(commitOverrides.commitId);
     setIsDirty(false);
     return nextName;
-  }, [clearReplayState, concertName, concertPayload, isTabOpen, writeConcertFile]);
+  }, [clearReplayState, concertName, concertPayload, isTabOpen, writeConcertFile, writeElectronConcertFile]);
 
   const saveConcertLocal = useCallback(async (versionOverride = null, deploymentName = null, commitOverrides = null) => {
     if (!isTabOpen) return validateConcertName(concertName);
+    if (concertLocalPath && window.metronomeElectron?.writeConcertFile) {
+      const nextName = getFileNameBase(concertLocalPath.split(/[\\/]/).at(-1));
+      const payloadName = deploymentName || nextName;
+      await writeElectronConcertFile(concertLocalPath, payloadName, versionOverride, commitOverrides);
+      setConcertName(nextName);
+      return payloadName;
+    }
     if (concertFileHandle && "createWritable" in concertFileHandle) {
       const nextName = getFileNameBase(concertFileHandle.name || concertName);
       const payloadName = deploymentName || nextName;
@@ -2176,27 +2275,94 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       return payloadName;
     }
     return saveConcertAsLocal(versionOverride, deploymentName, commitOverrides);
-  }, [concertFileHandle, concertName, isTabOpen, saveConcertAsLocal, writeConcertFile]);
+  }, [concertFileHandle, concertLocalPath, concertName, isTabOpen, saveConcertAsLocal, writeConcertFile, writeElectronConcertFile]);
 
   const openConcertLocal = useCallback(async () => {
+    if (window.metronomeElectron?.openConcertFile) {
+      const selectedFile = await window.metronomeElectron.openConcertFile();
+      if (!selectedFile) return;
+      const payload = JSON.parse(selectedFile.content);
+      openConcertPayloadInTab(payload, {
+        fileHandle: null,
+        fileLabel: getFileNameBase(selectedFile.name),
+        localPath: selectedFile.path,
+      });
+      return;
+    }
     if ("showOpenFilePicker" in window) {
       const [handle] = await window.showOpenFilePicker({
         multiple: false,
       });
       const file = await handle.getFile();
-      const payload = await inferConcertPayloadColumns(
-        JSON.parse(await file.text()),
-      );
+      const payload = JSON.parse(await file.text());
       openConcertPayloadInTab(payload, {
         expectedName: getFileNameBase(file.name),
         fileHandle: handle,
         fileLabel: getFileNameBase(file.name),
+        localPath: window.metronomeElectron?.getPathForFile(file) || "",
       });
       return;
     }
 
     openInputRef.current?.click();
-  }, [inferConcertPayloadColumns, openConcertPayloadInTab]);
+  }, [openConcertPayloadInTab]);
+
+  const saveDuplicateServerConcertAs = useCallback(async () => {
+    if (!duplicateServerConcert || isSavingDuplicateConcert) return;
+    setIsSavingDuplicateConcert(true);
+    try {
+      const originalName = concertBaseName(duplicateServerConcert.name);
+      const suggestedName = `${originalName}.concert`;
+      let nextName;
+      let fileHandle = null;
+      let localPath = "";
+
+      if (window.metronomeElectron?.selectConcertSavePath) {
+        const selection = await window.metronomeElectron.selectConcertSavePath(suggestedName);
+        if (!selection) {
+          setDuplicateServerConcert(null);
+          return;
+        }
+        nextName = getFileNameBase(selection.name);
+        const payload = { ...duplicateServerConcert.payload, name: nextName };
+        await window.metronomeElectron.writeConcertFile(
+          selection.path,
+          JSON.stringify(payload, null, 2),
+        );
+        localPath = selection.path;
+      } else if ("showSaveFilePicker" in window) {
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName,
+          types: [{ description: "Concert", accept: { "application/json": [".concert"] } }],
+        });
+        nextName = getFileNameBase(fileHandle.name);
+        const payload = { ...duplicateServerConcert.payload, name: nextName };
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(payload, null, 2));
+        await writable.close();
+      } else {
+        throw new Error("Save As is not available in this environment.");
+      }
+
+      const payload = { ...duplicateServerConcert.payload, name: nextName };
+      openConcertPayloadInTab(payload, {
+        fileHandle,
+        fileLabel: nextName,
+        localPath,
+        matchName: false,
+        validatePayload: false,
+      });
+      setDuplicateServerConcert(null);
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        setDuplicateServerConcert(null);
+      } else {
+        showError(`Save Concert copy failed: ${error.message}`);
+      }
+    } finally {
+      setIsSavingDuplicateConcert(false);
+    }
+  }, [duplicateServerConcert, isSavingDuplicateConcert, openConcertPayloadInTab, showError]);
 
   const openServerConcert = useCallback(async (name, concertIdOverride = "") => {
     const key = concertIdOverride || name;
@@ -2209,7 +2375,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         : `/playings-by-name/${encodeURIComponent(concertBaseName(name))}`;
       const response = await fetch(`${apiBaseUrl}${lookupPath}`);
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
-      const payload = await inferConcertPayloadColumns(await response.json());
+      const payload = await response.json();
+      const duplicate = tabsRef.current.some(
+        (tab) => !tab.concertLocalPath && tab.concertName === concertBaseName(name),
+      );
+      if (duplicate) {
+        setDuplicateServerConcert({ name, payload });
+        return;
+      }
       openConcertPayloadInTab(payload, {
         fileLabel: name.split("/").pop(),
         matchName: false,
@@ -2223,7 +2396,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       openingServerConcertsRef.current.delete(key);
       setOpeningConcertName("");
     }
-  }, [apiBaseUrl, inferConcertPayloadColumns, openConcertPayloadInTab]);
+  }, [apiBaseUrl, openConcertPayloadInTab]);
 
   const openDeploymentConcert = useCallback(async (item) => {
     if (item.kind === "playing") return openServerConcert(item.name, item.concertId);
@@ -2235,8 +2408,15 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const query = new URLSearchParams({ kind: item.kind, path: item.path });
       const response = await fetch(`${apiBaseUrl}/deployments/file?${query}`);
       if (!response.ok) throw new Error(`Open Concert failed: ${await response.text()}`);
-      const payload = await inferConcertPayloadColumns(await response.json());
+      const payload = await response.json();
       const fileLabel = item.path.split("/").pop().replace(/\.concert$/, "");
+      const duplicate = tabsRef.current.some(
+        (tab) => !tab.concertLocalPath && tab.concertName === concertBaseName(payload.name),
+      );
+      if (duplicate) {
+        setDuplicateServerConcert({ name: payload.name, payload });
+        return;
+      }
       openConcertPayloadInTab(payload, {
         fileLabel,
         matchName: false,
@@ -2250,18 +2430,19 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       openingServerConcertsRef.current.delete(key);
       setOpeningConcertName("");
     }
-  }, [apiBaseUrl, inferConcertPayloadColumns, openConcertPayloadInTab, openServerConcert]);
+  }, [apiBaseUrl, openConcertPayloadInTab, openServerConcert]);
 
   const handleFallbackOpen = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     try {
-      const payload = await inferConcertPayloadColumns(JSON.parse(await file.text()));
+      const payload = JSON.parse(await file.text());
       openConcertPayloadInTab(payload, {
         expectedName: getFileNameBase(file.name),
         fileHandle: null,
         fileLabel: getFileNameBase(file.name),
+        localPath: window.metronomeElectron?.getPathForFile(file) || "",
       });
     } catch (error) {
       showError(`Open Concert failed: ${error.message}`);
@@ -2606,6 +2787,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   useEffect(() => {
     const onKeyDown = (event) => {
+      const isNewShortcut =
+        (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n";
       const isSaveShortcut =
         (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s";
       const isOpenShortcut =
@@ -2645,6 +2828,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       if (isSelectAllShortcut && editData) {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+
+      if (isNewShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        openNewTab();
         return;
       }
 
@@ -2791,6 +2981,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     editData,
     nodes,
     openConcertLocal,
+    openNewTab,
     pasteGraph,
     redo,
     isReplayDialogOpen,
@@ -2961,6 +3152,12 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const selectedOutputColumns = useMemo(() => {
     if (!selectedNode) return [];
+    const previewNode = columnInferencePreview?.sourceNodeId === selectedNode.id
+      ? columnInferencePreview?.nodes?.find((node) => node.id === selectedNode.id)
+      : null;
+    if (previewNode && selectedNode.type !== "dbWrite") {
+      return normalizeColumnMetadata(previewNode.data?.outputColumns || []);
+    }
     const hasEditedOutputColumns =
       editData &&
       Object.prototype.hasOwnProperty.call(editData, "outputColumns");
@@ -2983,7 +3180,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         selectedNode.data?.dbReadSchema?.columns ||
         [],
     );
-  }, [editData, run, selectedInputDataframes, selectedNode]);
+  }, [columnInferencePreview, editData, run, selectedInputDataframes, selectedNode]);
 
   const selectedOutputMessage = useMemo(() => {
     if (!selectedNode) return "";
@@ -2997,9 +3194,13 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   }, [selectedNode, selectedOutputColumns.length]);
 
   const selectedOutputError = useMemo(() => {
-    if (selectedNode?.type !== "dbRead") return "";
+    if (!selectedNode) return "";
+    const previewNode = columnInferencePreview?.sourceNodeId === selectedNode.id
+      ? columnInferencePreview?.nodes?.find((node) => node.id === selectedNode.id)
+      : null;
+    if (previewNode) return previewNode.data?.schemaError || "";
     return editData?.schemaError || selectedNode.data?.schemaError || "";
-  }, [editData?.schemaError, selectedNode]);
+  }, [columnInferencePreview, editData, selectedNode]);
 
   const onConnect = useCallback(
     (params) => {
@@ -3035,8 +3236,9 @@ const ConcertTabView = forwardRef(function ConcertTabView(
       const nextEdges = addEdge(edge, retainedEdges);
       graphRef.current = { ...graphRef.current, edges: nextEdges };
       setEdges(nextEdges);
+      void refreshInferredColumns([params.target]);
     },
-    [dataframeColumnsForNode, nodeNameById, nodes, pushHistory, setEdges],
+    [dataframeColumnsForNode, nodeNameById, nodes, pushHistory, refreshInferredColumns, setEdges],
   );
 
   const handleNodesChange = useCallback(
@@ -3141,6 +3343,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const handleEdgesChange = useCallback(
     (changes) => {
+      const currentEdges = graphRef.current.edges;
       const removedEdgeIds = changes
         .filter((change) => change.type === "remove")
         .map((change) => change.id);
@@ -3157,11 +3360,21 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         pushHistory(label);
       }
       if (hasConcertEdgeChange(changes)) setIsDirty(true);
-      const nextEdges = applyEdgeChanges(changes, graphRef.current.edges);
+      const inferenceStartNodeIds = [
+        ...new Set(
+          currentEdges
+            .filter((edge) => removedEdgeIds.includes(edge.id))
+            .map((edge) => edge.target),
+        ),
+      ];
+      const nextEdges = applyEdgeChanges(changes, currentEdges);
       graphRef.current = { ...graphRef.current, edges: nextEdges };
       setEdges(nextEdges);
+      if (inferenceStartNodeIds.length) {
+        void refreshInferredColumns(inferenceStartNodeIds);
+      }
     },
-    [edgeLabelById, pushHistory, setEdges],
+    [edgeLabelById, pushHistory, refreshInferredColumns, setEdges],
   );
 
   const addNode = useCallback(
@@ -3277,6 +3490,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
 
   const closeEditor = useCallback(() => {
     clearNodeSelection();
+    setColumnInferencePreview(null);
     setEditData(null);
     setSearchHighlight(null);
     setIsSaveChangesDialogOpen(false);
@@ -3293,6 +3507,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
   const openEditor = (_, node) => {
     setContextMenu(null);
     setIsSaveChangesDialogOpen(false);
+    setColumnInferencePreview(null);
     selectOnlyNode(node.id);
     setEditData(editableNodeData(node));
     setSearchHighlight(null);
@@ -3323,6 +3538,7 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     );
     setContextMenu(null);
     setIsSaveChangesDialogOpen(false);
+    setColumnInferencePreview(null);
     if (action !== "open") {
       setEditData(null);
       setSearchHighlight(null);
@@ -3476,30 +3692,21 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     });
     const nextEdges = edges;
     const changed = hasChanges;
+    const shouldRefreshColumns =
+      selectedNode.type !== "text" &&
+      (changed || columnInferencePreview?.sourceNodeId === selectedNode.id);
     if (changed) {
       pushHistory(`Edit node: ${selectedNode.data?.name || selectedNode.id}`);
       setIsDirty(true);
     }
     graphRef.current = { nodes: nextNodes, edges: nextEdges };
     setNodes(nextNodes);
+    setColumnInferencePreview(null);
     setEditData(null);
     setSearchHighlight(null);
     setIsSaveChangesDialogOpen(false);
-    if (changed && selectedNode.type !== "text") {
-      try {
-        const inferred = await inferConcertColumns(
-          nextNodes,
-          nextEdges,
-          globalVariables,
-          inputVariables,
-          selectedNode.id,
-        );
-        graphRef.current = { nodes: inferred.nodes, edges: inferred.edges };
-        setNodes(inferred.nodes);
-        setEdges(inferred.edges);
-      } catch {
-        // Schema inference is best-effort and must not block or report node editing.
-      }
+    if (shouldRefreshColumns) {
+      await refreshInferredColumns([selectedNode.id]);
     }
   };
 
@@ -3848,18 +4055,6 @@ const ConcertTabView = forwardRef(function ConcertTabView(
     }
 
     const runConcertName = safeConcertPathName(concertName);
-    try {
-      await validateCalledConcerts(targetNodes);
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-      setRun({
-        status: "error",
-        nodes: {},
-        error: `Prepare Concert failed: ${error.message}`,
-      });
-      return;
-    }
-
     const nextNodes = nodes.map((node) =>
       node.type === "text"
         ? node
@@ -4063,13 +4258,18 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           {tabs.map((tab) => (
             <button
               className={`tab-button ${tab.id === activeTabId ? "active" : ""}`}
-              title={tab.concertFileLabel}
+              title={tab.concertLocalPath || tab.concertFileLabel}
               key={tab.id}
               onClick={() => switchTab(tab.id)}
             >
-              <span className="tab-title">
-                {tab.concertName}
-                {(tab.id === activeTabId ? isDirty : tab.isDirty) ? " *" : ""}
+              <span className="tab-labels">
+                <span className="tab-title">
+                  {tab.concertName}
+                  {(tab.id === activeTabId ? isDirty : tab.isDirty) ? " *" : ""}
+                </span>
+                {tab.concertLocalPath && (
+                  <span className="tab-local-path">{tab.concertLocalPath}</span>
+                )}
               </span>
               <span
                 className="tab-close"
@@ -4414,6 +4614,8 @@ const ConcertTabView = forwardRef(function ConcertTabView(
         onSave={saveEditor}
         onClose={closeEditor}
         onRequestClose={requestEditorClose}
+        onRefreshOutputColumns={refreshSelectedOutputColumns}
+        refreshingOutputColumns={refreshingOutputColumns}
       />
 
       {isSaveChangesDialogOpen && (
@@ -4421,6 +4623,14 @@ const ConcertTabView = forwardRef(function ConcertTabView(
           onSave={saveEditor}
           onDiscard={closeEditor}
           onCancel={() => setIsSaveChangesDialogOpen(false)}
+        />
+      )}
+      {duplicateServerConcert && (
+        <DuplicateConcertDialog
+          concertName={concertBaseName(duplicateServerConcert.name)}
+          busy={isSavingDuplicateConcert}
+          onSaveAs={saveDuplicateServerConcertAs}
+          onCancel={() => setDuplicateServerConcert(null)}
         />
       )}
 

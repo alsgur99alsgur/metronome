@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import OutputColumnsTitle from "./OutputColumnsTitle";
 import CallMergeOutlinedIcon from "@mui/icons-material/CallMergeOutlined";
 import CallSplitOutlinedIcon from "@mui/icons-material/CallSplitOutlined";
 import CompressOutlinedIcon from "@mui/icons-material/CompressOutlined";
@@ -343,10 +344,11 @@ function InputColumnsPanel({ inputDataframes = [] }) {
   );
 }
 
-function OutputColumnsPanel({ columns = [], emptyText }) {
+function OutputColumnsPanel({ columns = [], emptyText, error, onRefresh, refreshing }) {
   return (
     <aside className="column-side-panel">
-      <div className="column-title">Output Columns</div>
+      <OutputColumnsTitle onRefresh={onRefresh} refreshing={refreshing} />
+      {error && <div className="column-schema-error">{error}</div>}
       <ColumnList columns={columns} emptyText={emptyText} />
     </aside>
   );
@@ -359,6 +361,9 @@ export default function PythonEditor({
   inputDataframes = [],
   outputColumns = [],
   outputMessage = "Run this node to inspect output columns.",
+  outputError = "",
+  onRefreshOutputColumns,
+  refreshingOutputColumns = false,
 }) {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
@@ -555,7 +560,13 @@ export default function PythonEditor({
             />
           </div>
         </div>
-        <OutputColumnsPanel columns={outputColumns} emptyText={outputMessage} />
+        <OutputColumnsPanel
+          columns={outputColumns}
+          emptyText={outputMessage}
+          error={outputError}
+          onRefresh={onRefreshOutputColumns}
+          refreshing={refreshingOutputColumns}
+        />
       </div>
     </div>
   );

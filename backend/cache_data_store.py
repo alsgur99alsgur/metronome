@@ -137,9 +137,7 @@ class CacheDataStore:
         if task.loop_iterations is not None:
             node["loopIterations"] = task.loop_iterations
 
-        if task.type == "cacheRead" and task.cache_scope != "stage":
-            node["kind"] = "none"
-        elif isinstance(result, pd.DataFrame):
+        if isinstance(result, pd.DataFrame):
             file_name = f"{self._safe_name(task.id)}.parquet"
             atomic_write_parquet(result, os.path.join(self.path, file_name))
             node.update(self._dataframe_summary(result))

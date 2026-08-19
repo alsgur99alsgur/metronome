@@ -67,13 +67,13 @@ npm run build
 npx electron .
 ```
 
-Admin 앱은 Admin 프런트를 먼저 빌드하고 `--admin` 인자를 사용한다.
+Admin 앱은 Admin 프런트를 먼저 빌드하고 개발 경로를 선택하는 `--admin --dev` 인자를 사용한다.
 
 ```bash
 cd /Users/mh/Desktop/metronome/admin-frontend
 npm run build
 cd /Users/mh/Desktop/metronome/frontend
-npx electron . --admin
+npx electron . --admin --dev
 ```
 
 ## 2. 백엔드 실행 구조
@@ -167,7 +167,7 @@ Concert Call은 새로운 process를 만들지 않는다. 호출 대상 Playing 
 
 ### 2.3 백엔드 데이터 디렉터리
 
-백엔드 설정과 runtime 데이터는 `METRONOME_DATA_DIR`가 지정되어 있으면 해당 디렉터리에 저장하고, 지정되지 않았으면 다음 위치를 사용한다.
+백엔드 설정과 runtime 데이터는 다음 고정 위치를 사용하며 환경변수로 변경하지 않는다.
 
 - Windows 패키지: `metronome_backend.exe`가 들어 있는 `metronome_backend` 폴더
 - 개발 환경: 프로젝트의 `backend` 폴더

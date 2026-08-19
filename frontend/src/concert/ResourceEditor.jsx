@@ -1,12 +1,42 @@
 import { useEffect, useState } from "react";
+import OutputColumnsTitle from "./OutputColumnsTitle";
 
-export default function ResourceEditor({ data, onChange, write = false, apiBaseUrl }) {
+function ColumnsPanel({ title, columns = [], emptyText }) {
+  return (
+    <aside className="column-side-panel">
+      <div className="column-title">{title}</div>
+      <div className="column-list">
+        {columns.length ? columns.map((column) => (
+          <div className="column-row" key={`${column.name}-${column.type}`}>
+            <span className="column-name">{column.name}</span>
+            <span className="column-type">{column.type}</span>
+          </div>
+        )) : <div className="column-empty">{emptyText}</div>}
+      </div>
+    </aside>
+  );
+}
+
+export default function ResourceEditor({
+  data,
+  onChange,
+  write = false,
+  apiBaseUrl,
+  onRefreshOutputColumns,
+  refreshingOutputColumns = false,
+  inputDataframes = [],
+}) {
   const operation = data.operation || "append";
   const scope = data.scope || "stage";
   const [stageResources, setStageResources] = useState([]);
   const [columns, setColumns] = useState([]);
   const [schemaMessage, setSchemaMessage] = useState("Select a Stage resource.");
   const resourceLabel = "Cache";
+  const inputDataframe = inputDataframes[0] || null;
+  const inputColumns = inputDataframe?.columns || [];
+  const inputMessage = inputDataframe?.status === "not_run"
+    ? "Run parent node to inspect columns."
+    : "No connected input DataFrame.";
 
   useEffect(() => {
     if (!apiBaseUrl) return undefined;
@@ -33,7 +63,7 @@ export default function ResourceEditor({ data, onChange, write = false, apiBaseU
     const resourceName = data.resourceName || "";
     if (scope !== "stage" || !resourceName || !apiBaseUrl) {
       setColumns([]);
-      setSchemaMessage(scope === "stage" ? "Select a Stage resource." : "Concert resource schema is available after execution.");
+      setSchemaMessage("Select a Stage resource.");
       return undefined;
     }
     const controller = new AbortController();
@@ -65,18 +95,14 @@ export default function ResourceEditor({ data, onChange, write = false, apiBaseU
   };
 
   return (
-    <div className="resource-editor-grid">
-      <aside className="column-side-panel">
-        <div className="column-title">Columns</div>
-        <div className="column-list">
-          {columns.length ? columns.map((column) => (
-            <div className="column-row" key={`${column.name}-${column.type}`}>
-              <span className="column-name">{column.name}</span>
-              <span className="column-type">{column.type}</span>
-            </div>
-          )) : <div className="column-empty">{schemaMessage}</div>}
-        </div>
-      </aside>
+    <div className={`resource-editor-grid${write ? scope === "stage" ? " cache-write-stage" : " cache-write-concert" : scope === "stage" ? " columns-right" : " without-columns"}`}>
+      {write && (
+        <ColumnsPanel
+          title="Input Columns"
+          columns={inputColumns}
+          emptyText={inputMessage}
+        />
+      )}
       <div className="editor-form">
       <div className="resource-scope-radios">
         <label><input type="radio" checked={scope === "stage"} onChange={() => setScope("stage")} />for Stage</label>
@@ -132,6 +158,27 @@ export default function ResourceEditor({ data, onChange, write = false, apiBaseU
         </div>
       )}
       </div>
+      {scope === "stage" && write && (
+        <ColumnsPanel
+          title="Cache Columns"
+          columns={columns}
+          emptyText={schemaMessage}
+        />
+      )}
+      {scope === "stage" && !write && <aside className="column-side-panel">
+        <OutputColumnsTitle
+          onRefresh={onRefreshOutputColumns}
+          refreshing={refreshingOutputColumns}
+        />
+        <div className="column-list">
+          {columns.length ? columns.map((column) => (
+            <div className="column-row" key={`${column.name}-${column.type}`}>
+              <span className="column-name">{column.name}</span>
+              <span className="column-type">{column.type}</span>
+            </div>
+          )) : <div className="column-empty">{schemaMessage}</div>}
+        </div>
+      </aside>}
     </div>
   );
 }

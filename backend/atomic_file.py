@@ -17,8 +17,17 @@ def _temporary_path(final_path):
 
 def _replace(temporary, final_path):
     with open(temporary, "r+b") as file:
-        os.fsync(file.fileno())
+        _fsync(file)
     os.replace(temporary, final_path)
+
+
+def _fsync(file):
+    try:
+        os.fsync(file.fileno())
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 6:
+            return
+        raise
 
 
 def atomic_write_json(final_path, payload, *, default=None, allow_nan=True, indent=2):
@@ -37,7 +46,7 @@ def atomic_write_json(final_path, payload, *, default=None, allow_nan=True, inde
             )
             file.write("\n")
             file.flush()
-            os.fsync(file.fileno())
+            _fsync(file)
         os.replace(temporary, final_path)
     finally:
         if fd is not None:

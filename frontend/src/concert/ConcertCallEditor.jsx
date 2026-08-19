@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import OutputColumnsTitle from "./OutputColumnsTitle";
 
 import ConcertListPanel from "./ConcertListPanel";
 import { variableInputType, variableInputValue } from "./variableTypes";
@@ -78,10 +79,10 @@ function InputColumnsPanel({ inputDataframes = [] }) {
   );
 }
 
-function OutputColumnsPanel({ outputColumns = [], outputMessage }) {
+function OutputColumnsPanel({ outputColumns = [], outputMessage, onRefresh, refreshing }) {
   return (
     <aside className="column-side-panel">
-      <div className="column-title">Output Columns</div>
+      <OutputColumnsTitle onRefresh={onRefresh} refreshing={refreshing} />
       <ColumnList columns={outputColumns} emptyText={outputMessage} />
     </aside>
   );
@@ -121,6 +122,8 @@ export default function ConcertCallEditor({
   inputDataframes = [],
   outputColumns = [],
   outputMessage = "Run this node to inspect Concert output columns.",
+  onRefreshOutputColumns,
+  refreshingOutputColumns = false,
 }) {
   const { showError } = useErrorDialog();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -258,6 +261,8 @@ export default function ConcertCallEditor({
       <OutputColumnsPanel
         outputColumns={outputColumns}
         outputMessage={outputMessage}
+        onRefresh={onRefreshOutputColumns}
+        refreshing={refreshingOutputColumns}
       />
       {isPickerOpen && (
         <ConcertPickerDialog

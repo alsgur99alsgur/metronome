@@ -10,7 +10,8 @@
 - `json_serialization.py`: runtime datetime/date/time과 scalar의 JSON 저장 변환
 - `thread_local_output.py`: 병렬 node별 stdout/stderr 라우팅과 byte 제한
 
-데이터 루트는 `METRONOME_DATA_DIR`이며 미설정 시 `backend` 디렉터리다.
+데이터 루트는 개발 환경에서는 `backend` 디렉터리, Windows 패키지에서는
+`metronome_backend.exe`가 들어 있는 디렉터리다. 환경변수로 경로를 변경하지 않는다.
 노드 로그 제한은 `config.json`의 `executor.nodeLogLimitKb`이며 기본값은
 1024 KB다. 제한을 넘은 출력은 truncation marker 이후 버린다.
 

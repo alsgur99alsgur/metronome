@@ -117,7 +117,9 @@ Loop 내부 결과가 저장된 노드는 컨텍스트 메뉴의 `View Iteration
 
 패키지의 `metronome.cmd`는 공용 `electron.exe`를 일반 모드로 실행하고, `metronome_admin.cmd`는 같은 `electron.exe`를 `--admin` 모드로 실행해 `admin-dist`를 연다. 두 프런트는 백엔드 상태를 확인하거나 백엔드 프로세스를 시작·종료하지 않으며, 서버가 실행 중이지 않아도 각각 독립적으로 열린다.
 
-패키지 데이터 위치는 실행 파일 옆이며 Electron이 `METRONOME_DATA_DIR`로 백엔드에 전달한다.
+백엔드 데이터 위치는 백엔드가 자체 실행 위치를 기준으로 결정하며 Electron이 별도 환경변수를 전달하지 않는다.
+Admin 앱은 `--admin --dev`일 때 `admin-frontend/dist`를, `--admin`일 때 패키지의
+`resources/admin-dist`를 연다.
 
 ## Validation
 

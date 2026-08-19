@@ -1,4 +1,6 @@
+import builtins
 import re
+import time as real_time
 
 import numpy as np
 import pandas as pd
@@ -10,6 +12,23 @@ from concert_builder import (
     _safe_identifier,
 )
 from oracle_client import describe_oracle_query
+
+
+class _DummyTimeModule:
+    def sleep(self, _seconds):
+        return None
+
+    def __getattr__(self, name):
+        return getattr(real_time, name)
+
+
+_DUMMY_TIME = _DummyTimeModule()
+
+
+def _dummy_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if level == 0 and name == "time":
+        return _DUMMY_TIME
+    return builtins.__import__(name, globals, locals, fromlist, level)
 
 
 def _columns_from_data(data):
@@ -58,6 +77,7 @@ def _infer_python(node, input_columns, params):
     compiled = _compile_python_code(code)
     func_name = f"func_{_safe_identifier(data.get('name', ''))}"
     scope = {
+        "__builtins__": {**vars(builtins), "__import__": _dummy_import},
         "params": params,
         "concert_vars": params,
         "pd": pd,
@@ -81,7 +101,7 @@ def _infer_python(node, input_columns, params):
     return _dataframe_columns(result)
 
 
-def infer_concert_columns(nodes, edges, params=None, start_node_id=None):
+def infer_concert_columns(nodes, edges, params=None, start_node_ids=None):
     params = params or {}
     node_by_id = {node["id"]: node for node in nodes}
     incoming = {node_id: [] for node_id in node_by_id}
@@ -92,9 +112,10 @@ def infer_concert_columns(nodes, edges, params=None, start_node_id=None):
             outgoing[edge["source"]].append(edge)
 
     affected = set(node_by_id)
-    if start_node_id:
+    start_node_ids = [node_id for node_id in (start_node_ids or []) if node_id in node_by_id]
+    if start_node_ids:
         affected = set()
-        queue = [start_node_id]
+        queue = list(start_node_ids)
         while queue:
             node_id = queue.pop(0)
             if node_id in affected:
@@ -154,8 +175,12 @@ def infer_concert_columns(nodes, edges, params=None, start_node_id=None):
                 known[node_id] = parent_columns[0] if parent_columns else known.get(node_id, [])
         except Exception as exc:
             errors[node_id] = str(exc)
-            if parent_columns:
-                known[node_id] = parent_columns[0]
+            known[node_id] = [] if node_type == "python" else (parent_columns[0] if parent_columns else [])
 
     edge_columns = {edge["id"]: known.get(edge["source"], []) for edge in edges}
-    return {"nodeColumns": known, "edgeColumns": edge_columns, "errors": errors}
+    return {
+        "nodeColumns": known,
+        "edgeColumns": edge_columns,
+        "errors": errors,
+        "affectedNodeIds": list(affected),
+    }

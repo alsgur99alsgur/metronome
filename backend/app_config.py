@@ -1,11 +1,13 @@
 import json
 import os
+import sys
 from copy import deepcopy
 
 
-BACKEND_ROOT = os.environ.get(
-    "METRONOME_DATA_DIR",
-    os.path.dirname(os.path.abspath(__file__)),
+BACKEND_ROOT = (
+    os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False)
+    else os.path.dirname(os.path.abspath(__file__))
 )
 CONFIG_PATH = os.path.join(BACKEND_ROOT, "config.json")
 

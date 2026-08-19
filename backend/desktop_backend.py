@@ -1,26 +1,22 @@
 import ctypes
 import json
 import multiprocessing
-import os
 import sys
 from pathlib import Path
 from threading import Thread
 import time
 
+from app_config import BACKEND_ROOT
+
 
 def _initialize_data_directory():
-    default_root = (
-        Path(sys.executable).parent
-        if getattr(sys, "frozen", False)
-        else Path(__file__).parent
-    )
-    data_root = Path(os.environ.setdefault("METRONOME_DATA_DIR", str(default_root)))
+    data_root = Path(BACKEND_ROOT)
     data_root.mkdir(parents=True, exist_ok=True)
 
     defaults = {
         "config.json": {
             "backend": {
-                "consoleMode": True,
+                "consoleMode": False,
             },
             "oracle": {
                 "poolMin": 1,
@@ -57,7 +53,7 @@ def _initialize_data_directory():
 def _configure_console(data_root):
     from app_config import load_config
 
-    console_mode = load_config().get("backend", {}).get("consoleMode", True)
+    console_mode = load_config().get("backend", {}).get("consoleMode", False)
     if type(console_mode) is not bool:
         raise ValueError("config.json backend.consoleMode must be a boolean.")
     if sys.platform != "win32":
@@ -89,7 +85,7 @@ def _watch_console_mode(data_root):
             try:
                 from app_config import load_config
 
-                current = load_config().get("backend", {}).get("consoleMode", True)
+                current = load_config().get("backend", {}).get("consoleMode", False)
                 if current != previous:
                     _configure_console(data_root)
                     previous = current
